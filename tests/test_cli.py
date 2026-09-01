@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -29,11 +30,92 @@ def test_init_and_status(tmp_path, monkeypatch):
     assert code == 0
     assert payload["status"] == "ok"
     assert (tmp_path / ".niles" / "events").is_dir()
+    manifest = json.loads((tmp_path / ".niles" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == "niles.project.v1"
+    assert manifest["storage"]["source_of_truth"] == ".niles/events/"
+    assert (tmp_path / ".niles" / ".gitignore").read_text(encoding="utf-8") == "index/\n"
 
     code, payload = run_niles(tmp_path, "status")
     assert code == 0
     assert payload["data"]["contacts"] == 0
     assert payload["data"]["open_tasks"] == 0
+
+
+def test_rebuild_index_restores_deleted_sqlite_projection(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Acme Data")[0] == 0
+    assert run_niles(tmp_path, "note", "add", "acme-data", "Intro call")[0] == 0
+    index = tmp_path / ".niles" / "index" / "niles.sqlite"
+    assert index.is_file()
+    index.unlink()
+
+    code, payload = run_niles(tmp_path, "status")
+    assert code == 0
+    assert payload["data"]["contacts"] == 1
+    assert payload["data"]["notes"] == 1
+    assert index.is_file()
+
+    index.unlink()
+    code, payload = run_niles(tmp_path, "rebuild-index")
+    assert code == 0
+    assert payload["data"]["counts"]["contacts"] == 1
+    assert index.is_file()
+
+
+def test_filesystem_state_can_move_without_index(tmp_path):
+    source = tmp_path / "source"
+    clone = tmp_path / "clone"
+    source.mkdir()
+    clone.mkdir()
+    assert run_niles(source, "init")[0] == 0
+    assert run_niles(source, "contact", "add", "Acme Data", "--tag", "prospect")[0] == 0
+    assert run_niles(source, "task", "add", "acme-data", "Follow up")[0] == 0
+
+    shutil.copytree(
+        source / ".niles",
+        clone / ".niles",
+        ignore=shutil.ignore_patterns("index"),
+    )
+    assert not (clone / ".niles" / "index" / "niles.sqlite").exists()
+
+    code, payload = run_niles(clone, "status")
+    assert code == 0
+    assert payload["data"]["contacts"] == 1
+    assert payload["data"]["open_tasks"] == 1
+    assert (clone / ".niles" / "index" / "niles.sqlite").is_file()
+
+
+def test_fsck_success_and_corrupt_event_failure(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Acme Data")[0] == 0
+
+    code, payload = run_niles(tmp_path, "fsck")
+    assert code == 0
+    assert payload["data"]["ok"] is True
+    assert payload["data"]["index_is_derived"] is True
+
+    (tmp_path / ".niles" / "events" / "000000000002.json").write_text("{bad json\n", encoding="utf-8")
+    code, payload = run_niles(tmp_path, "fsck")
+    assert code == 1
+    assert payload["status"] == "error"
+    assert payload["errors"][0]["code"] == "invalid_event_json"
+
+
+def test_fsck_detects_sequence_gap_and_unsupported_type(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Acme Data")[0] == 0
+    first_event = tmp_path / ".niles" / "events" / "000000000001.json"
+    event = json.loads(first_event.read_text(encoding="utf-8"))
+    event["sequence"] = 3
+    event["type"] = "mystery_event"
+    first_event.write_text(json.dumps(event, indent=2) + "\n", encoding="utf-8")
+
+    code, payload = run_niles(tmp_path, "fsck")
+    assert code == 1
+    codes = {error["code"] for error in payload["errors"]}
+    assert "event_sequence_gap" in codes
+    assert "event_filename_mismatch" in codes
+    assert "unsupported_event_type" in codes
 
 
 def test_agent_next_before_and_after_init(tmp_path):
@@ -224,6 +306,8 @@ def test_export_import_round_trip(tmp_path):
         names = set(zf.namelist())
     assert "niles-export-manifest.json" in names
     assert ".niles/config.toml" in names
+    assert ".niles/manifest.json" in names
+    assert ".niles/.gitignore" in names
     assert not any(name.startswith(".niles/index/") for name in names)
 
     code, payload = run_niles(target, "import", str(archive))

@@ -41,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init")
     sub.add_parser("status")
+    sub.add_parser("rebuild-index")
+    sub.add_parser("fsck")
     export_parser = sub.add_parser("export")
     export_parser.add_argument("archive")
     import_parser = sub.add_parser("import")
@@ -202,7 +204,17 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
             {
                 "project_root": str(project.root),
                 "state_dir": ".niles",
-                "created": [".niles/config.toml", ".niles/events/", ".niles/index/niles.sqlite", ".niles/surveys/"],
+                "created": [
+                    ".niles/manifest.json",
+                    ".niles/.gitignore",
+                    ".niles/config.toml",
+                    ".niles/events/",
+                    ".niles/index/niles.sqlite",
+                    ".niles/surveys/",
+                    ".niles/reports/",
+                ],
+                "source_of_truth": ".niles/events/",
+                "derived": [".niles/index/niles.sqlite"],
             },
             next_steps=[
                 NextStep(
@@ -230,6 +242,31 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
         )
 
     project = Project.open(Path.cwd())
+    if args.command == "rebuild-index":
+        return ok(
+            "rebuild-index",
+            argv,
+            project.rebuild_index_report(),
+            next_steps=[
+                NextStep(
+                    label="Verify filesystem state",
+                    command="niles fsck",
+                    mutates=False,
+                )
+            ],
+        )
+    if args.command == "fsck":
+        data = project.fsck()
+        if not data["ok"]:
+            return Envelope(
+                status="error",
+                command="fsck",
+                argv=argv,
+                data=data,
+                warnings=data["warnings"],
+                errors=data["errors"],
+            )
+        return ok("fsck", argv, data, warnings=data["warnings"])
     if args.command == "export":
         data = project.export_archive(Path(args.archive))
         return ok(
@@ -328,6 +365,8 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
             "available_now": [
                 "niles init",
                 "niles status",
+                "niles rebuild-index",
+                "niles fsck",
                 "niles contact add/show/list",
                 "niles contact update/tag/archive/merge",
                 "niles note add",

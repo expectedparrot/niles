@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from html import escape
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 
@@ -64,6 +65,20 @@ def unique(values: list[str]) -> list[str]:
 
 EXPORT_SCHEMA_VERSION = "niles.export.v1"
 EXPORT_MANIFEST = "niles-export-manifest.json"
+PROJECT_SCHEMA_VERSION = "niles.project.v1"
+EVENT_SCHEMA_VERSION = "niles.event.v1"
+SUPPORTED_EVENT_TYPES = {
+    "contact_created",
+    "contact_updated",
+    "contact_archived",
+    "contacts_merged",
+    "note_created",
+    "task_created",
+    "task_done",
+    "task_updated",
+    "org_context_set",
+    "material_added",
+}
 
 
 @dataclass
@@ -82,15 +97,41 @@ class Project:
     def index_path(self) -> Path:
         return self.state_dir / "index" / "niles.sqlite"
 
+    @property
+    def manifest_path(self) -> Path:
+        return self.state_dir / "manifest.json"
+
     @classmethod
     def init(cls, root: Path) -> "Project":
         project = cls(root.resolve())
         project.events_dir.mkdir(parents=True, exist_ok=True)
         (project.state_dir / "index").mkdir(parents=True, exist_ok=True)
         (project.state_dir / "surveys").mkdir(parents=True, exist_ok=True)
+        (project.state_dir / "reports").mkdir(parents=True, exist_ok=True)
         config = project.state_dir / "config.toml"
         if not config.exists():
             config.write_text('format_version = 1\n', encoding="utf-8")
+        if not project.manifest_path.exists():
+            project.manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": PROJECT_SCHEMA_VERSION,
+                        "project_id": new_id("proj"),
+                        "created_at": utc_now(),
+                        "storage": {
+                            "source_of_truth": ".niles/events/",
+                            "derived": [".niles/index/niles.sqlite"],
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        niles_gitignore = project.state_dir / ".gitignore"
+        if not niles_gitignore.exists():
+            niles_gitignore.write_text("index/\n", encoding="utf-8")
         project.rebuild_index()
         return project
 
@@ -99,7 +140,10 @@ class Project:
         current = start.resolve()
         for path in [current, *current.parents]:
             if (path / ".niles").is_dir():
-                return cls(path)
+                project = cls(path)
+                if not project.index_path.exists():
+                    project.rebuild_index()
+                return project
         raise NilesError(
             "not_initialized",
             "No .niles directory found. Run `niles init` first.",
@@ -142,8 +186,8 @@ class Project:
             members = [name for name in names if name != EXPORT_MANIFEST and not name.endswith("/")]
             for name in members:
                 validate_archive_member(name)
-            if ".niles/config.toml" not in members:
-                raise NilesError("invalid_archive", "Archive is missing .niles/config.toml.", {"path": str(archive)})
+            if ".niles/manifest.json" not in members and ".niles/config.toml" not in members:
+                raise NilesError("invalid_archive", "Archive is missing .niles/manifest.json.", {"path": str(archive)})
             if state_dir.exists():
                 shutil.rmtree(state_dir)
             state_dir.mkdir(parents=True, exist_ok=True)
@@ -155,7 +199,11 @@ class Project:
         project = cls(destination)
         project.events_dir.mkdir(parents=True, exist_ok=True)
         (project.state_dir / "surveys").mkdir(parents=True, exist_ok=True)
+        (project.state_dir / "reports").mkdir(parents=True, exist_ok=True)
         (project.state_dir / "index").mkdir(parents=True, exist_ok=True)
+        niles_gitignore = project.state_dir / ".gitignore"
+        if not niles_gitignore.exists():
+            niles_gitignore.write_text("index/\n", encoding="utf-8")
         project.rebuild_index()
         return {
             "project_root": str(destination),
@@ -168,7 +216,7 @@ class Project:
         self.events_dir.mkdir(parents=True, exist_ok=True)
         seq = self._next_sequence()
         event = {
-            "schema_version": "niles.event.v1",
+            "schema_version": EVENT_SCHEMA_VERSION,
             "event_id": new_id("evt"),
             "sequence": seq,
             "created_at": utc_now(),
@@ -196,15 +244,20 @@ class Project:
 
         event_files = sorted(self.events_dir.glob("*.json"))
         survey_files = sorted(path for path in (self.state_dir / "surveys").rglob("*") if path.is_file())
+        report_files = sorted(path for path in (self.state_dir / "reports").rglob("*") if path.is_file())
         config_path = self.state_dir / "config.toml"
+        manifest_path = self.manifest_path
+        niles_gitignore = self.state_dir / ".gitignore"
         manifest = {
             "schema_version": EXPORT_SCHEMA_VERSION,
             "created_at": utc_now(),
             "project_root_name": self.root.name,
             "includes": {
+                "manifest": manifest_path.exists(),
                 "config": config_path.exists(),
                 "events": len(event_files),
                 "surveys": len(survey_files),
+                "reports": len(report_files),
                 "index": False,
             },
             "counts": self.counts(),
@@ -214,11 +267,18 @@ class Project:
             zf.writestr(EXPORT_MANIFEST, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
             zf.writestr(".niles/events/", "")
             zf.writestr(".niles/surveys/", "")
+            zf.writestr(".niles/reports/", "")
+            if manifest_path.exists():
+                zf.write(manifest_path, ".niles/manifest.json")
+            if niles_gitignore.exists():
+                zf.write(niles_gitignore, ".niles/.gitignore")
             if config_path.exists():
                 zf.write(config_path, ".niles/config.toml")
             for path in event_files:
                 zf.write(path, path.relative_to(self.root).as_posix())
             for path in survey_files:
+                zf.write(path, path.relative_to(self.root).as_posix())
+            for path in report_files:
                 zf.write(path, path.relative_to(self.root).as_posix())
 
         return {
@@ -299,6 +359,131 @@ class Project:
             for path in sorted(self.events_dir.glob("*.json")):
                 event = json.loads(path.read_text(encoding="utf-8"))
                 self._apply_event(conn, event)
+
+    def rebuild_index_report(self) -> dict[str, Any]:
+        self.rebuild_index()
+        return {
+            "project_root": str(self.root),
+            "rebuilt": str(self.index_path),
+            "counts": self.counts(),
+        }
+
+    def fsck(self) -> dict[str, Any]:
+        errors: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if not self.manifest_path.exists():
+            warnings.append({"code": "missing_manifest", "message": ".niles/manifest.json is missing."})
+        else:
+            try:
+                manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                if manifest.get("schema_version") != PROJECT_SCHEMA_VERSION:
+                    errors.append(
+                        {
+                            "code": "unsupported_project_schema",
+                            "message": "Unsupported project manifest schema.",
+                            "schema_version": manifest.get("schema_version"),
+                        }
+                    )
+            except json.JSONDecodeError as exc:
+                errors.append({"code": "invalid_manifest_json", "message": str(exc)})
+
+        events: list[dict[str, Any]] = []
+        event_ids: set[str] = set()
+        event_paths = sorted(self.events_dir.glob("*.json"))
+        for expected_sequence, path in enumerate(event_paths, start=1):
+            try:
+                event = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                errors.append({"code": "invalid_event_json", "path": str(path), "message": str(exc)})
+                continue
+            if event.get("schema_version") != EVENT_SCHEMA_VERSION:
+                errors.append(
+                    {
+                        "code": "unsupported_event_schema",
+                        "path": str(path),
+                        "schema_version": event.get("schema_version"),
+                    }
+                )
+            if event.get("type") not in SUPPORTED_EVENT_TYPES:
+                errors.append(
+                    {
+                        "code": "unsupported_event_type",
+                        "path": str(path),
+                        "event_type": event.get("type"),
+                    }
+                )
+            if event.get("sequence") != expected_sequence:
+                errors.append(
+                    {
+                        "code": "event_sequence_gap",
+                        "path": str(path),
+                        "expected": expected_sequence,
+                        "actual": event.get("sequence"),
+                    }
+                )
+            if path.name != f"{event.get('sequence', 0):012d}.json":
+                errors.append(
+                    {
+                        "code": "event_filename_mismatch",
+                        "path": str(path),
+                        "sequence": event.get("sequence"),
+                    }
+                )
+            event_id = event.get("event_id")
+            if event_id in event_ids:
+                errors.append({"code": "duplicate_event_id", "event_id": event_id, "path": str(path)})
+            if event_id:
+                event_ids.add(event_id)
+            events.append(event)
+
+        replay_errors = self._replay_errors(events)
+        errors.extend(replay_errors)
+        ok = not errors
+        return {
+            "ok": ok,
+            "project_root": str(self.root),
+            "event_count": len(event_paths),
+            "index_path": str(self.index_path),
+            "index_is_derived": True,
+            "errors": errors,
+            "warnings": warnings,
+        }
+
+    def _replay_errors(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if any(event.get("schema_version") != EVENT_SCHEMA_VERSION for event in events):
+            return []
+        with TemporaryDirectory(prefix="niles-fsck-") as tmp:
+            probe = Project(Path(tmp))
+            probe.events_dir.mkdir(parents=True, exist_ok=True)
+            (probe.state_dir / "index").mkdir(parents=True, exist_ok=True)
+            try:
+                with probe.connect() as conn:
+                    for event in events:
+                        probe._apply_event(conn, event)
+                    orphan_notes = conn.execute(
+                        """
+                        select count(*)
+                          from notes
+                          left join contacts on notes.contact_id = contacts.id
+                         where contacts.id is null
+                        """
+                    ).fetchone()[0]
+                    orphan_tasks = conn.execute(
+                        """
+                        select count(*)
+                          from tasks
+                          left join contacts on tasks.contact_id = contacts.id
+                         where tasks.contact_id is not null and contacts.id is null
+                        """
+                    ).fetchone()[0]
+            except Exception as exc:  # noqa: BLE001 - fsck reports replay failures as data.
+                return [{"code": "replay_failed", "message": str(exc)}]
+        replay_errors = []
+        if orphan_notes:
+            replay_errors.append({"code": "orphan_notes", "count": orphan_notes})
+        if orphan_tasks:
+            replay_errors.append({"code": "orphan_tasks", "count": orphan_tasks})
+        return replay_errors
 
     def apply_event(self, event: dict[str, Any]) -> None:
         with self.connect() as conn:

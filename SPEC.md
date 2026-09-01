@@ -41,6 +41,11 @@ Follow bewley's conventions unless a CRM-specific reason forces a deviation:
   replaces, or deletes registered events. For a CRM this doubles as the
   interaction audit trail, and makes "when did this field change and why"
   answerable — including "this field was set by intake submission X."
+- **GitHub can be the backend.** A CRM project may be a normal git repository.
+  Commit durable `.niles/` files (`manifest.json`, `events/`, `surveys/`,
+  material metadata, selected reports) and ignore `.niles/index/`. Cloning or
+  pulling the repository plus `niles rebuild-index` recreates the local binary
+  projection.
 - **Agent-first output contract.** Every command emits exactly one versioned
   JSON envelope to stdout: `schema_version`, `status` (`ok`/`error`),
   `command`, `argv`, `data`, `warnings`, `errors`, `next_steps`. Failures
@@ -166,6 +171,8 @@ envelope; representative examples only — full flags via `--help`.
 ```
 niles init                                  # create project (.niles/)
 niles status                                # counts, stale contacts, pending intake/updates
+niles fsck                                  # verify manifest, event log, replay, projections
+niles rebuild-index                         # rebuild disposable sqlite projection
 niles guide | niles next | niles capabilities
 
 niles contact add "Jane Doe" --email jane@acme.com --company Acme --tag prospect
