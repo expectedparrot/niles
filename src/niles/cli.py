@@ -41,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init")
     sub.add_parser("status")
+    export_parser = sub.add_parser("export")
+    export_parser.add_argument("archive")
+    import_parser = sub.add_parser("import")
+    import_parser.add_argument("archive")
+    import_parser.add_argument("--replace", action="store_true")
 
     agent = sub.add_parser("agent")
     agent_sub = agent.add_subparsers(dest="agent_command", required=True)
@@ -129,8 +134,36 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
         )
     if args.command == "agent":
         return dispatch_agent(args, argv)
+    if args.command == "import":
+        data = Project.import_archive(Path.cwd(), Path(args.archive), replace=args.replace)
+        return ok(
+            "import",
+            argv,
+            data,
+            next_steps=[
+                NextStep(
+                    label="Ask what to do next",
+                    command="niles agent next",
+                    mutates=False,
+                )
+            ],
+        )
 
     project = Project.open(Path.cwd())
+    if args.command == "export":
+        data = project.export_archive(Path(args.archive))
+        return ok(
+            "export",
+            argv,
+            data,
+            next_steps=[
+                NextStep(
+                    label="Import into another directory",
+                    command=f'niles import {data["archive"]}',
+                    mutates=True,
+                )
+            ],
+        )
     if args.command == "status":
         data = project.counts()
         return ok(
@@ -209,6 +242,8 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles contact add/show/list",
                 "niles note add",
                 "niles task add/list/done",
+                "niles export",
+                "niles import",
                 "niles agent next",
             ],
             "planned_edsl_handoff": [

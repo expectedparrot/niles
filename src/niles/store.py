@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sqlite3
+import zipfile
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -55,6 +57,10 @@ def loads(value: str | None, default: Any) -> Any:
     return json.loads(value)
 
 
+EXPORT_SCHEMA_VERSION = "niles.export.v1"
+EXPORT_MANIFEST = "niles-export-manifest.json"
+
+
 @dataclass
 class Project:
     root: Path
@@ -95,6 +101,64 @@ class Project:
             {"start": str(start)},
         )
 
+    @classmethod
+    def import_archive(cls, root: Path, archive_path: Path, replace: bool = False) -> dict[str, Any]:
+        destination = root.resolve()
+        state_dir = destination / ".niles"
+        archive = archive_path.expanduser().resolve()
+        if not archive.is_file():
+            raise NilesError("archive_not_found", f"Archive not found: {archive_path}", {"path": str(archive_path)})
+        if state_dir.exists() and not replace:
+            raise NilesError(
+                "project_exists",
+                "A .niles directory already exists. Use --replace to overwrite it.",
+                {"project_root": str(destination), "state_dir": str(state_dir)},
+            )
+
+        try:
+            zf_context = zipfile.ZipFile(archive, "r")
+        except zipfile.BadZipFile as exc:
+            raise NilesError("invalid_archive", "Archive is not a readable zip file.", {"path": str(archive)}) from exc
+
+        with zf_context as zf:
+            names = zf.namelist()
+            if EXPORT_MANIFEST not in names:
+                raise NilesError("invalid_archive", f"Missing {EXPORT_MANIFEST}.", {"path": str(archive)})
+            try:
+                manifest = json.loads(zf.read(EXPORT_MANIFEST).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise NilesError("invalid_archive", "Archive manifest is not valid JSON.", {"path": str(archive)}) from exc
+            if manifest.get("schema_version") != EXPORT_SCHEMA_VERSION:
+                raise NilesError(
+                    "unsupported_archive",
+                    "Archive schema is not supported.",
+                    {"schema_version": manifest.get("schema_version"), "supported": EXPORT_SCHEMA_VERSION},
+                )
+            members = [name for name in names if name != EXPORT_MANIFEST and not name.endswith("/")]
+            for name in members:
+                validate_archive_member(name)
+            if ".niles/config.toml" not in members:
+                raise NilesError("invalid_archive", "Archive is missing .niles/config.toml.", {"path": str(archive)})
+            if state_dir.exists():
+                shutil.rmtree(state_dir)
+            state_dir.mkdir(parents=True, exist_ok=True)
+            for name in members:
+                target = destination / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(name))
+
+        project = cls(destination)
+        project.events_dir.mkdir(parents=True, exist_ok=True)
+        (project.state_dir / "surveys").mkdir(parents=True, exist_ok=True)
+        (project.state_dir / "index").mkdir(parents=True, exist_ok=True)
+        project.rebuild_index()
+        return {
+            "project_root": str(destination),
+            "archive": str(archive),
+            "manifest": manifest,
+            "counts": project.counts(),
+        }
+
     def append_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.events_dir.mkdir(parents=True, exist_ok=True)
         seq = self._next_sequence()
@@ -116,6 +180,48 @@ class Project:
         if not existing:
             return 1
         return int(existing[-1].stem) + 1
+
+    def export_archive(self, archive_path: Path) -> dict[str, Any]:
+        archive = archive_path.expanduser()
+        if archive.suffix.lower() != ".zip":
+            archive = archive.with_suffix(archive.suffix + ".zip") if archive.suffix else archive.with_suffix(".zip")
+        if not archive.is_absolute():
+            archive = self.root / archive
+        archive.parent.mkdir(parents=True, exist_ok=True)
+
+        event_files = sorted(self.events_dir.glob("*.json"))
+        survey_files = sorted(path for path in (self.state_dir / "surveys").rglob("*") if path.is_file())
+        config_path = self.state_dir / "config.toml"
+        manifest = {
+            "schema_version": EXPORT_SCHEMA_VERSION,
+            "created_at": utc_now(),
+            "project_root_name": self.root.name,
+            "includes": {
+                "config": config_path.exists(),
+                "events": len(event_files),
+                "surveys": len(survey_files),
+                "index": False,
+            },
+            "counts": self.counts(),
+        }
+
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(EXPORT_MANIFEST, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            zf.writestr(".niles/events/", "")
+            zf.writestr(".niles/surveys/", "")
+            if config_path.exists():
+                zf.write(config_path, ".niles/config.toml")
+            for path in event_files:
+                zf.write(path, path.relative_to(self.root).as_posix())
+            for path in survey_files:
+                zf.write(path, path.relative_to(self.root).as_posix())
+
+        return {
+            "archive": str(archive),
+            "manifest": manifest,
+            "portable": True,
+            "restore_command": f"niles import {archive}",
+        }
 
     def connect(self) -> sqlite3.Connection:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -425,3 +531,13 @@ class Project:
             "created_at": row["created_at"],
             "done_note": row["done_note"],
         }
+
+
+def validate_archive_member(name: str) -> None:
+    path = Path(name)
+    if path.is_absolute() or ".." in path.parts:
+        raise NilesError("invalid_archive", f"Unsafe archive path: {name}", {"member": name})
+    if not name.startswith(".niles/"):
+        raise NilesError("invalid_archive", f"Unexpected archive path: {name}", {"member": name})
+    if name.startswith(".niles/index/"):
+        raise NilesError("invalid_archive", "Archive must not contain derived index files.", {"member": name})

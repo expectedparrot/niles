@@ -36,6 +36,7 @@ How Niles works:
 - The durable source of truth is an append-only event log under .niles/events/.
 - SQLite under .niles/index/ is a rebuildable projection for listing, lookup, and reporting.
 - Every command emits one JSON envelope to stdout with status, data, errors, warnings, and next_steps.
+- Portable setup uses niles export/import zip archives; archives include durable .niles state and rebuild the SQLite index after import.
 - EDSL/EP work is explicit: niles exports .ep jobs or humanize requests, ep runs them, and niles imports reviewed results.
 
 When to use Niles:
@@ -74,6 +75,9 @@ Core CRM commands:
 9. Add a task: niles task add <contact-ref> "Send proof outline and two relevant customer examples" --due YYYY-MM-DD --assign john --tag next-step
 10. List tasks: niles task list --status open --assignee john
 11. Complete a task: niles task done <task-id> --note "What happened"
+12. Export a CRM for another context: niles export niles-crm.zip
+13. Import a CRM in a fresh directory: niles import /path/to/niles-crm.zip
+14. Replace an existing local CRM only when the user explicitly asks: niles import /path/to/niles-crm.zip --replace
 
 EDSL job workflow:
 - Niles should export .ep jobs for model/human work.
@@ -86,6 +90,7 @@ Common pitfalls:
 - Do not edit .niles/events/ directly.
 - Do not assume a fuzzy contact reference is safe when multiple contacts may match.
 - Do not store secrets in CRM state.
+- Do not use niles import --replace unless the user explicitly wants to overwrite the destination .niles state.
 - Do not treat planned EDSL commands as available unless niles agent next or niles --help shows them in the installed version.
 
 For niles source development:

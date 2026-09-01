@@ -187,6 +187,8 @@ niles teammate list | niles teammate show <ref>
 niles search <terms>                        # FTS over names, notes, traits
 niles import csv <path> [--mapping m.toml]  # column→field mapping, dry-run default
 niles export csv|json [--tag t]
+niles export <archive.zip>                  # portable .niles state archive
+niles import <archive.zip> [--replace]      # restore archive and rebuild index
 
 niles survey list | show | copy | edit
 niles survey run <name> [--contact <ref>]   # interactive terminal Q&A → routed answers

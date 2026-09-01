@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 
@@ -106,6 +107,45 @@ def test_contact_note_task_flow(tmp_path):
     code, payload = run_niles(tmp_path, "task", "done", task_id, "--note", "Sent note")
     assert code == 0
     assert payload["data"]["status"] == "done"
+
+
+def test_export_import_round_trip(tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    target.mkdir()
+    archive = tmp_path / "niles-export.zip"
+
+    assert run_niles(source, "init")[0] == 0
+    assert run_niles(source, "contact", "add", "Acme Data", "--tag", "prospect")[0] == 0
+    assert run_niles(source, "note", "add", "acme-data", "Intro call", "--kind", "call")[0] == 0
+    assert run_niles(source, "task", "add", "acme-data", "Send follow-up", "--due", "2026-09-05")[0] == 0
+
+    code, payload = run_niles(source, "export", str(archive))
+    assert code == 0
+    assert payload["data"]["archive"] == str(archive)
+    assert archive.is_file()
+
+    with zipfile.ZipFile(archive) as zf:
+        names = set(zf.namelist())
+    assert "niles-export-manifest.json" in names
+    assert ".niles/config.toml" in names
+    assert not any(name.startswith(".niles/index/") for name in names)
+
+    code, payload = run_niles(target, "import", str(archive))
+    assert code == 0
+    assert payload["data"]["counts"]["contacts"] == 1
+    assert payload["data"]["counts"]["notes"] == 1
+    assert payload["data"]["counts"]["open_tasks"] == 1
+
+    code, payload = run_niles(target, "contact", "list")
+    assert code == 0
+    assert payload["data"]["contacts"][0]["slug"] == "acme-data"
+    assert (target / ".niles" / "index" / "niles.sqlite").is_file()
+
+    code, payload = run_niles(target, "import", str(archive))
+    assert code == 1
+    assert payload["errors"][0]["code"] == "project_exists"
 
 
 def test_ambiguous_contact_ref_blocks_mutation(tmp_path):
