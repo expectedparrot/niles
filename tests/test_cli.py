@@ -214,7 +214,30 @@ def test_notes_contact_updates_tasks_and_report(tmp_path):
     assert payload["data"]["archived"] is True
 
     assert run_niles(tmp_path, "contact", "add", "Workday", "--tag", "prospect")[0] == 0
+    assert run_niles(
+        tmp_path,
+        "org",
+        "context",
+        "set",
+        "Expected Parrot tracks warm enterprise research leads.",
+        "--name",
+        "Expected Parrot",
+        "--trait",
+        "segment=research",
+    )[0] == 0
+    assert run_niles(
+        tmp_path,
+        "material",
+        "add",
+        "Buyer FAQ",
+        "--url",
+        "https://example.com/faq",
+        "--tag",
+        "sales",
+    )[0] == 0
+    assert run_niles(tmp_path, "note", "add", "workday", "<script>alert('x')</script>", "--kind", "note")[0] == 0
     assert run_niles(tmp_path, "task", "add", "workday", "Reach out to Athena", "--assign", "john")[0] == 0
+    assert run_niles(tmp_path, "task", "add", "workday", "Send pricing deck", "--assign", "robin", "--due", "2026-09-05")[0] == 0
     code, payload = run_niles(tmp_path, "task", "list", "--assignee", "john")
     task_id = payload["data"]["tasks"][0]["id"]
 
@@ -231,7 +254,14 @@ def test_notes_contact_updates_tasks_and_report(tmp_path):
     code, payload = run_niles(tmp_path, "report", "status", "--html", str(report))
     assert code == 0
     assert report.is_file()
-    assert "Workday" in report.read_text(encoding="utf-8")
+    html = report.read_text(encoding="utf-8")
+    assert "E[&#x1f99c;] Expected Parrot" in html
+    assert "Expected Parrot CRM Status" in html
+    assert "Next Actions" in html
+    assert "Send pricing deck" in html
+    assert "Buyer FAQ" in html
+    assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html
+    assert "<script>alert('x')</script>" not in html
 
 
 def test_org_material_enrichment_and_merge(tmp_path):

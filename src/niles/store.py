@@ -1030,7 +1030,8 @@ class Project:
         notes = self.list_notes(limit=50)
         tasks = self.list_tasks(status="open")
         org = self.get_org_context()
-        html = build_status_html(self.root.name, self.counts(), org, contacts, notes, tasks)
+        materials = self.list_materials()
+        html = build_status_html(self.root.name, self.counts(), org, contacts, notes, tasks, materials)
         out.write_text(html, encoding="utf-8")
         return {"path": str(out), "counts": self.counts()}
 
@@ -1134,77 +1135,227 @@ def build_status_html(
     contacts: list[dict[str, Any]],
     notes: list[dict[str, Any]],
     tasks: list[dict[str, Any]],
+    materials: list[dict[str, Any]],
 ) -> str:
-    contact_rows = "\n".join(
-        "<tr>"
-        f"<td>{escape(contact['name'])}</td>"
-        f"<td>{escape(', '.join(contact['tags']))}</td>"
-        f"<td>{escape(str(contact.get('traits', {}).get('priority', '')))}</td>"
-        f"<td>{escape(contact.get('last_touched') or '')}</td>"
-        "</tr>"
-        for contact in contacts
+    generated_at = utc_now()
+    visible_contacts = sorted(
+        contacts,
+        key=lambda contact: (
+            bool(contact.get("archived")),
+            priority_sort_key(contact.get("traits", {}).get("priority")),
+            contact["name"].lower(),
+        ),
     )
+    org_name = org.get("name") or project_name
+    org_context = org.get("context") or "No organization context has been set."
+    org_traits = org.get("traits") or {}
+
+    def date_label(value: str | None) -> str:
+        if not value:
+            return ""
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            return value[:10]
+
+    def badge(value: Any, css_class: str = "") -> str:
+        if value in (None, ""):
+            return '<span class="muted">-</span>'
+        classes = f"badge {css_class}".strip()
+        return f'<span class="{classes}">{escape(str(value))}</span>'
+
+    def tag_list(tags: list[str]) -> str:
+        if not tags:
+            return '<span class="muted">-</span>'
+        return "".join(badge(tag, "tag") for tag in tags)
+
+    def empty_row(columns: int, text: str) -> str:
+        return f'<tr><td class="empty-cell" colspan="{columns}">{escape(text)}</td></tr>'
+
     task_rows = "\n".join(
         "<tr>"
-        f"<td>{escape(task.get('due_date') or '')}</td>"
-        f"<td>{escape(task.get('assignee') or '')}</td>"
-        f"<td>{escape(task.get('contact') or '')}</td>"
-        f"<td>{escape(task['text'])}</td>"
+        f"<td>{escape(date_label(task.get('due_date')) or 'No due date')}</td>"
+        f"<td>{escape(task.get('assignee') or 'Unassigned')}</td>"
+        f"<td>{escape(task.get('contact') or 'No contact')}</td>"
+        f"<td><strong>{escape(task['text'])}</strong><div class=\"row-tags\">{tag_list(task.get('tags', []))}</div></td>"
         "</tr>"
         for task in tasks
-    )
+    ) or empty_row(4, "No open tasks.")
+
+    contact_rows = "\n".join(
+        "<tr>"
+        f"<td><strong>{escape(contact['name'])}</strong><div class=\"subtle\">{escape(contact.get('company') or contact.get('role') or contact['slug'])}</div></td>"
+        f"<td>{tag_list(contact['tags'])}</td>"
+        f"<td>{badge(contact.get('traits', {}).get('priority'), 'priority')}</td>"
+        f"<td>{escape(date_label(contact.get('last_touched')) or 'No notes yet')}</td>"
+        f"<td>{badge('Archived' if contact.get('archived') else 'Active', 'state archived' if contact.get('archived') else 'state active')}</td>"
+        "</tr>"
+        for contact in visible_contacts
+    ) or empty_row(5, "No contacts yet.")
+
     note_rows = "\n".join(
         "<tr>"
-        f"<td>{escape(note['created_at'])}</td>"
-        f"<td>{escape(note['contact'])}</td>"
-        f"<td>{escape(note['kind'])}</td>"
+        f"<td>{escape(date_label(note['created_at']))}</td>"
+        f"<td>{escape(note.get('contact') or 'No contact')}</td>"
+        f"<td>{badge(note['kind'], 'kind')}</td>"
         f"<td>{escape(note['text'])}</td>"
         "</tr>"
         for note in notes
+    ) or empty_row(4, "No notes yet.")
+
+    material_rows = "\n".join(
+        "<tr>"
+        f"<td><strong>{escape(material['title'])}</strong><div class=\"subtle\">{escape(material.get('description') or '')}</div></td>"
+        f"<td>{material_link(material)}</td>"
+        f"<td>{tag_list(material.get('tags', []))}</td>"
+        f"<td>{escape(date_label(material.get('created_at')))}</td>"
+        "</tr>"
+        for material in materials
+    ) or empty_row(4, "No materials yet.")
+
+    trait_items = "\n".join(
+        f"<dt>{escape(str(key))}</dt><dd>{escape(str(value))}</dd>"
+        for key, value in sorted(org_traits.items())
     )
-    org_context = escape(org.get("context") or "No org context set.")
+    trait_block = f'<dl class="trait-list">{trait_items}</dl>' if trait_items else '<p class="muted">No organization traits set.</p>'
+
     return f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Niles Status - {escape(project_name)}</title>
+    <title>Niles Status - {escape(org_name)}</title>
     <style>
-      body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; background: #fff; }}
-      header {{ padding: 32px 40px; border-bottom: 1px solid #d4d8de; }}
-      main {{ max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }}
-      h1 {{ margin: 0 0 8px; font-size: 44px; }}
-      h2 {{ margin: 30px 0 10px; font-size: 24px; }}
-      p {{ color: #626b75; max-width: 780px; }}
-      .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 20px; }}
-      .stat {{ border: 1px solid #d4d8de; border-radius: 8px; padding: 14px; background: #f6f8fa; }}
-      .value {{ display: block; font-size: 28px; font-weight: 700; }}
-      table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-      th, td {{ border-bottom: 1px solid #d4d8de; padding: 9px 8px; text-align: left; vertical-align: top; }}
-      th {{ background: #f6f8fa; font-size: 13px; }}
-      td {{ font-size: 14px; }}
+      :root {{
+        --ep-green: #428a5f;
+        --ep-green-light: #5ba97a;
+        --ep-green-soft: rgba(66, 138, 95, 0.10);
+        --ep-dark: #1a1a1a;
+        --ep-gray: #666666;
+        --ep-light-gray: #f5f5f5;
+        --ep-border: #e0e0e0;
+        --ep-amber: #b26b2a;
+        --font-serif: Georgia, 'Times New Roman', serif;
+        --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        --font-mono: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{ margin: 0; font-family: var(--font-sans); color: var(--ep-dark); background: #fff; line-height: 1.5; }}
+      .shell {{ max-width: 1180px; margin: 0 auto; padding: 24px 24px 52px; }}
+      header {{ border-bottom: 3px solid var(--ep-green); padding-bottom: 18px; margin-bottom: 24px; }}
+      .brand-row {{ display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 18px; }}
+      .brand {{ font-family: var(--font-serif); color: var(--ep-green); font-size: 0.95rem; white-space: nowrap; }}
+      .generated {{ color: var(--ep-gray); font-size: 0.78rem; }}
+      h1 {{ margin: 0 0 10px; font-family: var(--font-serif); font-size: 3.6rem; line-height: 0.98; letter-spacing: 0; }}
+      h2 {{ margin: 0; font-family: var(--font-serif); font-size: 1.2rem; color: var(--ep-green); }}
+      p {{ margin: 0; color: var(--ep-gray); max-width: 820px; }}
+      .lede {{ font-size: 1rem; }}
+      .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-top: 20px; }}
+      .stat {{ border: 1px solid var(--ep-border); border-radius: 8px; padding: 13px 14px; background: var(--ep-light-gray); min-height: 82px; }}
+      .value {{ display: block; font-size: 2rem; line-height: 1.05; font-weight: 750; color: var(--ep-dark); }}
+      .label {{ display: block; margin-top: 6px; color: var(--ep-gray); font-size: 0.82rem; }}
+      .section {{ margin-top: 28px; }}
+      .section-head {{ display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--ep-border); padding-bottom: 7px; margin-bottom: 10px; }}
+      .section-note {{ color: var(--ep-gray); font-size: 0.78rem; }}
+      .grid-2 {{ display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.8fr); gap: 18px; align-items: start; }}
+      .panel {{ border: 1px solid var(--ep-border); border-radius: 8px; padding: 14px; background: #fff; }}
+      .panel h3 {{ margin: 0 0 8px; font-size: 0.88rem; text-transform: uppercase; letter-spacing: 0; color: var(--ep-gray); }}
+      .panel .trait-list, .panel .muted {{ margin-top: 10px; }}
+      .trait-list {{ display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 0.86rem; }}
+      .trait-list dt {{ color: var(--ep-gray); }}
+      .trait-list dd {{ margin: 0; font-weight: 650; }}
+      .table-wrap {{ overflow-x: auto; border: 1px solid var(--ep-border); border-radius: 8px; background: #fff; }}
+      table {{ width: 100%; border-collapse: collapse; min-width: 720px; }}
+      th, td {{ border-bottom: 1px solid var(--ep-border); padding: 10px 12px; text-align: left; vertical-align: top; }}
+      th {{ background: var(--ep-light-gray); color: var(--ep-gray); font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0; font-weight: 750; }}
+      td {{ font-size: 0.88rem; }}
+      tr:last-child td {{ border-bottom: 0; }}
+      a {{ color: var(--ep-green); text-decoration-thickness: 1px; text-underline-offset: 2px; }}
+      .badge {{ display: inline-flex; align-items: center; border-radius: 4px; background: var(--ep-green-soft); color: var(--ep-green); padding: 2px 7px; margin: 0 4px 4px 0; font-size: 0.76rem; font-weight: 700; white-space: nowrap; }}
+      .priority {{ background: rgba(178, 107, 42, 0.12); color: var(--ep-amber); }}
+      .kind {{ background: #f2f2f2; color: var(--ep-dark); }}
+      .state.active {{ background: var(--ep-green-soft); color: var(--ep-green); }}
+      .state.archived {{ background: #f2f2f2; color: var(--ep-gray); }}
+      .row-tags {{ margin-top: 5px; }}
+      .subtle {{ color: var(--ep-gray); font-size: 0.78rem; margin-top: 2px; }}
+      .muted {{ color: var(--ep-gray); }}
+      .empty-cell {{ color: var(--ep-gray); text-align: center; padding: 24px; }}
+      footer {{ color: var(--ep-gray); font-size: 0.78rem; margin-top: 34px; border-top: 1px solid var(--ep-border); padding-top: 12px; }}
+      @media (max-width: 760px) {{
+        .shell {{ padding: 18px 14px 40px; }}
+        .brand-row, .section-head {{ align-items: flex-start; flex-direction: column; gap: 6px; }}
+        .grid-2 {{ grid-template-columns: 1fr; }}
+        h1 {{ font-size: 2.25rem; }}
+      }}
     </style>
   </head>
   <body>
-    <header>
-      <h1>{escape(project_name)} CRM Status</h1>
-      <p>{org_context}</p>
-      <div class="stats">
-        <div class="stat"><span class="value">{counts['active_contacts']}</span>active contacts</div>
-        <div class="stat"><span class="value">{counts['archived_contacts']}</span>archived contacts</div>
-        <div class="stat"><span class="value">{counts['notes']}</span>notes</div>
-        <div class="stat"><span class="value">{counts['open_tasks']}</span>open tasks</div>
-        <div class="stat"><span class="value">{counts['materials']}</span>materials</div>
-      </div>
-    </header>
-    <main>
-      <h2>Open Tasks</h2>
-      <table><thead><tr><th>Due</th><th>Assignee</th><th>Contact</th><th>Task</th></tr></thead><tbody>{task_rows}</tbody></table>
-      <h2>Contacts</h2>
-      <table><thead><tr><th>Name</th><th>Tags</th><th>Priority</th><th>Last touched</th></tr></thead><tbody>{contact_rows}</tbody></table>
-      <h2>Recent Notes</h2>
-      <table><thead><tr><th>Created</th><th>Contact</th><th>Kind</th><th>Text</th></tr></thead><tbody>{note_rows}</tbody></table>
-    </main>
+    <div class="shell">
+      <header>
+        <div class="brand-row">
+          <span class="brand">E[&#x1f99c;] Expected Parrot</span>
+          <span class="generated">Generated {escape(date_label(generated_at))} by niles</span>
+        </div>
+        <h1>{escape(org_name)} CRM Status</h1>
+        <p class="lede">{escape(org_context)}</p>
+        <div class="stats">
+          <div class="stat"><span class="value">{counts['active_contacts']}</span><span class="label">active contacts</span></div>
+          <div class="stat"><span class="value">{counts['archived_contacts']}</span><span class="label">archived contacts</span></div>
+          <div class="stat"><span class="value">{counts['open_tasks']}</span><span class="label">open tasks</span></div>
+          <div class="stat"><span class="value">{counts['notes']}</span><span class="label">notes captured</span></div>
+          <div class="stat"><span class="value">{counts['materials']}</span><span class="label">sales materials</span></div>
+        </div>
+      </header>
+      <main>
+        <section class="grid-2 section">
+          <div>
+            <div class="section-head"><h2>Next Actions</h2><span class="section-note">Open tasks sorted by due date</span></div>
+            <div class="table-wrap"><table><thead><tr><th>Due</th><th>Owner</th><th>Contact</th><th>Task</th></tr></thead><tbody>{task_rows}</tbody></table></div>
+          </div>
+          <aside class="panel">
+            <h3>Organization</h3>
+            <p>{escape(org_context)}</p>
+            {trait_block}
+          </aside>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Contacts</h2><span class="section-note">Active contacts first, then archived records</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Name</th><th>Tags</th><th>Priority</th><th>Last Touched</th><th>State</th></tr></thead><tbody>{contact_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Recent Notes</h2><span class="section-note">Latest 50 notes</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Date</th><th>Contact</th><th>Kind</th><th>Note</th></tr></thead><tbody>{note_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Materials</h2><span class="section-note">Company context available to agents</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Title</th><th>Location</th><th>Tags</th><th>Added</th></tr></thead><tbody>{material_rows}</tbody></table></div>
+        </section>
+      </main>
+      <footer>Generated {escape(generated_at)} by niles &middot; Expected Parrot</footer>
+    </div>
   </body>
 </html>
 """
+
+
+def priority_sort_key(value: Any) -> tuple[int, str]:
+    if value in (None, ""):
+        return (1, "")
+    try:
+        return (0, f"{float(value):020.6f}")
+    except (TypeError, ValueError):
+        return (0, str(value).lower())
+
+
+def material_link(material: dict[str, Any]) -> str:
+    target = material.get("url") or material.get("path")
+    if not target:
+        return '<span class="muted">-</span>'
+    safe_target = escape(str(target), quote=True)
+    safe_label = escape(str(target))
+    if material.get("url"):
+        return f'<a href="{safe_target}">{safe_label}</a>'
+    return safe_label
