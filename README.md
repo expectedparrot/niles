@@ -8,80 +8,28 @@ Docs: https://expectedparrot.github.io/niles/
 
 License: MIT. The code and bundled Niles artwork are MIT licensed.
 
-## Install
+## Codex Agent Block
 
-```bash
-git clone https://github.com/expectedparrot/niles.git
-cd niles
-python -m pip install -e .
-```
-
-## Install With EDSL / EP
-
-Niles core commands do not need network access. EDSL/Expected Parrot support is needed for humanize-powered status requests, intake flows, and `.ep` recommendation jobs.
-
-```bash
-git clone https://github.com/expectedparrot/niles.git
-cd niles
-python -m pip install -e ".[edsl]"
-```
-
-Create or log in to an Expected Parrot account, then register the API key in your shell environment:
-
-```bash
-export EXPECTED_PARROT_API_KEY="your-ep-api-key"
-```
-
-Confirm that EDSL imports and the `ep` command is available:
-
-```bash
-python -c "import edsl; print(edsl.__version__)"
-ep --help
-```
-
-## Start A CRM
-
-```bash
-mkdir acme-crm
-cd acme-crm
-niles init
-```
-
-## Add Contacts One By One
-
-```bash
-niles contact add "Acme Data" \
-  --tag prospect \
-  --trait source=warm_intro \
-  --trait priority=1 \
-  --cadence-days 14
-
-niles contact add "Maya Chen" \
-  --company "Acme Data" \
-  --role "VP Data" \
-  --email maya@acmedata.example \
-  --tag buyer
-```
-
-## Track Notes And Tasks
-
-```bash
-niles note add acme-data "Robin introduced us. Maya wants a short technical proof before budget review." --kind call
-
-niles task add acme-data "Send proof outline and two relevant customer examples" \
-  --due 2026-09-05 \
-  --assign john \
-  --tag next-step
-
-niles task list --assignee john --status open
-```
-
-## Agent Instructions
-
-Use this block when giving Codex, Claude Code, or another coding agent access to a Niles CRM project:
+Copy and paste this whole block into Codex, Claude Code, or another coding agent:
 
 ```text
-You are working with niles, a local-first CRM CLI.
+You are working with niles, a local-first CRM CLI for relationship work.
+
+Install niles from GitHub:
+1. Run: git clone https://github.com/expectedparrot/niles.git
+2. Run: cd niles
+3. For core local CRM commands, run: python -m pip install -e .
+4. For EDSL/Expected Parrot workflows, run: python -m pip install -e ".[edsl]"
+5. If the edsl extra is unavailable in the current environment, run: python -m pip install edsl
+6. Verify installation with: niles version
+
+Install and register EDSL / EP:
+1. Create or log in to an Expected Parrot account.
+2. Register the API key in the shell environment as EXPECTED_PARROT_API_KEY.
+3. Never store, print, commit, or write the API key into CRM notes, events, docs, examples, or git history.
+4. Verify EDSL with: python -c "import edsl; print(edsl.__version__)"
+5. Verify the EP CLI with: ep --help
+6. Niles core commands do not need network access. EDSL/EP is needed for humanize-powered status requests, intake flows, and .ep recommendation jobs.
 
 Project boundary:
 - Run niles commands from the CRM project directory, not from the niles source checkout unless you are developing niles itself.
@@ -97,42 +45,24 @@ Command contract:
 - Use stable ids or unambiguous slugs returned by previous envelopes when mutating contacts, notes, or tasks.
 
 Core CRM commands:
-- Initialize: niles init
-- Inspect: niles status
-- Add contact: niles contact add "Name" --email person@example.com --tag prospect --trait priority=1
-- Show contact: niles contact show <id-or-slug>
-- List contacts: niles contact list [--tag prospect]
-- Add note: niles note add <contact-ref> "Note text" --kind call
-- Add task: niles task add <contact-ref> "Task text" --due YYYY-MM-DD --assign john --tag next-step
-- List tasks: niles task list --status open [--assignee john]
-- Complete task: niles task done <task-id> --note "What happened"
-
-EDSL / EP setup:
-- Install Niles with EDSL support from GitHub:
-  git clone https://github.com/expectedparrot/niles.git
-  cd niles
-  python -m pip install -e ".[edsl]"
-- If needed, install EDSL directly:
-  python -m pip install edsl
-- Expected Parrot auth is delegated to EDSL/EP.
-- Do not store or print API keys in CRM notes, events, docs, or git.
-- The shell should provide EXPECTED_PARROT_API_KEY for commands that need the EP server:
-  export EXPECTED_PARROT_API_KEY="..."
-- Verify setup:
-  python -c "import edsl; print(edsl.__version__)"
-  ep --help
+1. Initialize a CRM project: niles init
+2. Inspect state: niles status
+3. Add a company/contact: niles contact add "Acme Data" --tag prospect --trait source=warm_intro --trait priority=1 --cadence-days 14
+4. Add a person/contact: niles contact add "Maya Chen" --company "Acme Data" --role "VP Data" --email maya@acmedata.example --tag buyer
+5. Show a contact: niles contact show <id-or-slug>
+6. List contacts: niles contact list --tag prospect
+7. Add a note: niles note add <contact-ref> "Robin introduced us. Maya wants a short technical proof before budget review." --kind call
+8. Add a task: niles task add <contact-ref> "Send proof outline and two relevant customer examples" --due YYYY-MM-DD --assign john --tag next-step
+9. List tasks: niles task list --status open --assignee john
+10. Complete a task: niles task done <task-id> --note "What happened"
 
 EDSL job workflow:
 - Niles should export .ep jobs for model/human work.
 - Run exported jobs with ep.
 - Import audited results back into Niles.
 - Do not invent CRM mutations from model output until a niles import/review/accept command records them.
+
+For niles source development:
+- Run tests from the niles source checkout with: python -m pytest
+- Read SPEC.md before changing command semantics, event shapes, survey routing, EDSL handoff behavior, or JSON envelope structure.
 ```
-
-## Test
-
-```bash
-python -m pytest
-```
-
-The v1 implementation is intentionally small. See `SPEC.md` for the planned EDSL survey, status-update, recommendation, teammate, and reporting flows.
