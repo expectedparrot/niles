@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Niles CRM Tutorial</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1f2328;
+        --muted: #626b75;
+        --line: #d4d8de;
+        --panel: #f6f8fa;
+        --paper: #ffffff;
+        --accent: #5f8f49;
+        --accent-strong: #2f6f32;
+        --gold: #c58a2b;
+        --code: #111820;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: var(--paper);
+        line-height: 1.5;
+      }
+
+      a {
+        color: var(--accent-strong);
+      }
+
+      .hero {
+        min-height: 92vh;
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
+        align-items: center;
+        gap: 32px;
+        padding: 28px clamp(20px, 5vw, 72px) 44px;
+        border-bottom: 1px solid var(--line);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .brand-mark {
+        position: absolute;
+        left: -0.08em;
+        top: 0.05em;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(180px, 28vw, 460px);
+        line-height: 0.8;
+        color: rgba(35, 38, 42, 0.16);
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .hero-copy {
+        position: relative;
+        z-index: 1;
+        max-width: 680px;
+        padding-left: clamp(0px, 5vw, 64px);
+      }
+
+      .bracket {
+        border-left: 12px solid #626262;
+        border-top: 12px solid #626262;
+        border-bottom: 12px solid #626262;
+        padding: 36px 0 36px 34px;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(52px, 8vw, 118px);
+        letter-spacing: 0;
+        line-height: 0.9;
+      }
+
+      .lede {
+        max-width: 600px;
+        color: var(--muted);
+        font-size: clamp(18px, 2vw, 23px);
+        margin: 0 0 26px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .button {
+        min-height: 42px;
+        padding: 10px 15px;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        background: var(--paper);
+        text-decoration: none;
+        font-weight: 650;
+      }
+
+      .button.primary {
+        color: #fff;
+        background: var(--accent-strong);
+        border-color: var(--accent-strong);
+      }
+
+      .art {
+        position: relative;
+        z-index: 1;
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 520px;
+      }
+
+      .art::before,
+      .art::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        width: 136px;
+        height: 136px;
+        border-right: 12px solid #626262;
+        pointer-events: none;
+      }
+
+      .art::before {
+        top: 0;
+        border-top: 12px solid #626262;
+      }
+
+      .art::after {
+        bottom: 0;
+        border-bottom: 12px solid #626262;
+      }
+
+      .art img {
+        width: min(100%, 900px);
+        height: auto;
+        display: block;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 44px clamp(18px, 4vw, 40px) 72px;
+      }
+
+      section {
+        padding: 28px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      section:last-child {
+        border-bottom: 0;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: clamp(26px, 4vw, 42px);
+        letter-spacing: 0;
+        line-height: 1.05;
+      }
+
+      h3 {
+        margin: 24px 0 8px;
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      p {
+        max-width: 760px;
+        color: var(--muted);
+      }
+
+      pre {
+        margin: 14px 0;
+        padding: 16px;
+        overflow-x: auto;
+        color: #f3f7fb;
+        background: var(--code);
+        border-radius: 8px;
+        border: 1px solid #263341;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 0.95em;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      details {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        margin: 12px 0 0;
+      }
+
+      summary {
+        cursor: pointer;
+        padding: 12px 14px;
+        font-weight: 650;
+      }
+
+      details pre {
+        margin: 0;
+        border-radius: 0 0 8px 8px;
+        border-left: 0;
+        border-right: 0;
+        border-bottom: 0;
+      }
+
+      .token {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 2px 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--ink);
+        background: #fff;
+        font-size: 13px;
+        font-weight: 650;
+        margin: 4px 6px 4px 0;
+      }
+
+      .note {
+        border-left: 4px solid var(--gold);
+        padding-left: 14px;
+      }
+
+      @media (max-width: 860px) {
+        .hero {
+          min-height: auto;
+          grid-template-columns: 1fr;
+          padding-bottom: 28px;
+        }
+
+        .hero-copy {
+          padding-left: 0;
+        }
+
+        .bracket {
+          border-width: 8px;
+          padding: 22px 0 22px 22px;
+        }
+
+        .art {
+          min-height: 260px;
+          justify-content: flex-end;
+        }
+
+        .art::before,
+        .art::after {
+          width: 86px;
+          height: 86px;
+          border-width: 8px;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="brand-mark">E</div>
+      <div class="hero-copy">
+        <div class="bracket">
+          <h1>Niles</h1>
+          <p class="lede">A local-first CRM CLI for adding contacts one by one, capturing notes, assigning tasks, and handing richer judgment work to EDSL jobs.</p>
+          <div class="actions">
+            <a class="button primary" href="#tutorial">Start Tutorial</a>
+            <a class="button" href="https://github.com/expectedparrot/niles">GitHub</a>
+          </div>
+        </div>
+      </div>
+      <div class="art" aria-label="Niles artwork">
+        <img src="assets/niles-artwork.png" alt="A business parrot holding a contract and briefcase">
+      </div>
+    </header>
+
+    <main id="tutorial">
+      <section>
+        <h2>Initialize A CRM</h2>
+        <p>Niles stores the event log, SQLite projection, and survey artifacts in `.niles/` inside the current project directory.</p>
+        <pre><code>mkdir acme-crm
+cd acme-crm
+niles init</code></pre>
+        <details>
+          <summary>Result</summary>
+          <pre><code>{
+  "schema": "niles.envelope.v1",
+  "status": "ok",
+  "command": "init",
+  "data": {
+    "state_dir": ".niles",
+    "created": [".niles/config.toml", ".niles/events/", ".niles/index/niles.sqlite", ".niles/surveys/"]
+  },
+  "next_steps": [
+    {"label": "Add a contact", "command": "niles contact add \"Jane Doe\" --email jane@example.com", "mutates": true}
+  ]
+}</code></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>Add The Relationship Graph</h2>
+        <p>Use direct commands instead of spreadsheet imports. A contact can be a company, person, partner, funder, vendor, or any relationship object worth tracking.</p>
+        <div class="grid">
+          <div class="step">
+            <h3>Company</h3>
+            <pre><code>niles contact add "Acme Data" \
+  --tag prospect \
+  --trait source=warm_intro \
+  --trait priority=1 \
+  --cadence-days 14</code></pre>
+          </div>
+          <div class="step">
+            <h3>Person</h3>
+            <pre><code>niles contact add "Maya Chen" \
+  --company "Acme Data" \
+  --role "VP Data" \
+  --email maya@acmedata.example \
+  --tag buyer</code></pre>
+          </div>
+        </div>
+        <details>
+          <summary>Result</summary>
+          <pre><code>{
+  "status": "ok",
+  "command": "contact add",
+  "data": {
+    "contact": {
+      "id": "ct_8d7b31c9",
+      "slug": "acme-data",
+      "name": "Acme Data",
+      "tags": ["prospect"],
+      "traits": {"source": "warm_intro", "priority": 1}
+    }
+  }
+}</code></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>Capture Notes And Tasks</h2>
+        <p>Every note and task points back to a contact. Open tasks become the practical operating layer for reminders, owner queues, and lightweight reporting.</p>
+        <pre><code>niles note add acme-data "Robin introduced us. Maya wants a short technical proof before budget review." --kind call
+
+niles task add acme-data "Send proof outline and two relevant customer examples" \
+  --due 2026-09-05 \
+  --assign john \
+  --tag next-step</code></pre>
+        <details>
+          <summary>Result</summary>
+          <pre><code>{
+  "status": "ok",
+  "command": "task add",
+  "data": {
+    "task": {
+      "id": "tk_a21f70cb",
+      "contact_id": "ct_8d7b31c9",
+      "text": "Send proof outline and two relevant customer examples",
+      "due": "2026-09-05",
+      "assignee": "john",
+      "tags": ["next-step"],
+      "status": "open"
+    }
+  }
+}</code></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>Ask Humans For Updates</h2>
+        <p>Status requests create EDSL humanize jobs. The learned updates are imported as notes and can create follow-up tasks when the response implies action.</p>
+        <pre><code>niles status-request export acme-data \
+  --to robin \
+  --question "What changed since the last Acme Data note?" \
+  --out .niles/surveys/acme-status.ep
+
+ep run .niles/surveys/acme-status.ep
+
+niles status-request import .niles/surveys/acme-status-results.json \
+  --learned-as note \
+  --create-tasks</code></pre>
+        <details>
+          <summary>Learned CRM Update</summary>
+          <pre><code>{
+  "status": "ok",
+  "command": "status-request import",
+  "data": {
+    "notes_created": [
+      {
+        "contact": "Acme Data",
+        "kind": "intake",
+        "text": "Robin said Acme moved budget review to September 12 and needs security language before then."
+      }
+    ],
+    "tasks_created": [
+      {
+        "text": "Send security language for Acme review",
+        "assignee": "john",
+        "due": "2026-09-07"
+      }
+    ]
+  }
+}</code></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>Export Recommendation Jobs</h2>
+        <p>Recommendations are exported as `.ep` jobs, run by `ep`, then imported back into Niles. The CRM records the accepted next steps instead of pretending local heuristics made the judgment.</p>
+        <pre><code>niles recommend export \
+  --scope companies \
+  --focus "best next step this week" \
+  --out .niles/surveys/company-next-steps.ep
+
+ep run .niles/surveys/company-next-steps.ep
+
+niles recommend import .niles/surveys/company-next-steps-results.json
+
+niles recommend accept rec_acme_001 \
+  --assign john \
+  --due 2026-09-06</code></pre>
+        <details>
+          <summary>Imported Recommendation</summary>
+          <pre><code>{
+  "status": "ok",
+  "command": "recommend import",
+  "data": {
+    "recommendations": [
+      {
+        "id": "rec_acme_001",
+        "contact": "Acme Data",
+        "recommendation": "Send the security language first, then ask Maya to confirm the September 12 budget-review attendees.",
+        "confidence": 0.82
+      }
+    ]
+  }
+}</code></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>Track The Team</h2>
+        <p>Company context and teammates make the CRM useful for who is doing what, without requiring a full sales platform.</p>
+        <pre><code>niles org context set "We sell EDSL-backed research workflows to teams that need repeatable AI evaluation."
+
+niles teammate add john --name "John Horton" --role "Founder"
+niles teammate add robin --name "Robin Horton" --role "Founder"
+
+niles task list --assignee john --status open
+niles report pipeline --by assignee --since 2026-09-01</code></pre>
+        <p class="note">
+          <span class="token">contacts</span>
+          <span class="token">notes</span>
+          <span class="token">tasks</span>
+          <span class="token">status updates</span>
+          <span class="token">recommendations</span>
+          <span class="token">reports</span>
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

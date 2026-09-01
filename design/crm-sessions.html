@@ -1,0 +1,1265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>niles CRM Command Sessions</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+  <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --ink: #17202a;
+      --muted: #65717f;
+      --line: #d8dde5;
+      --panel: #ffffff;
+      --code-bg: #f3f5f7;
+      --json-bg: #101419;
+      --json-ink: #e8edf2;
+      --accent: #0b6bcb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .wrap {
+      width: min(1100px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    header .wrap { padding: 28px 0 18px; }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 6px;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+
+    .subtitle, .note {
+      margin: 0 0 12px;
+      color: var(--muted);
+      max-width: 920px;
+    }
+
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    nav a {
+      color: var(--accent);
+      border: 1px solid var(--line);
+      background: #fbfcfd;
+      padding: 6px 10px;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    main { padding: 24px 0 48px; }
+
+    section {
+      margin: 0 0 30px;
+      padding: 0 0 28px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .command {
+      margin: 12px 0 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .command pre {
+      margin: 0;
+      padding: 12px 14px;
+      background: var(--code-bg);
+      overflow-x: auto;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .command code.hljs {
+      padding: 0;
+      background: transparent;
+    }
+
+    details {
+      border-top: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 9px 14px;
+      color: var(--accent);
+      font-size: 13px;
+      user-select: none;
+    }
+
+    details pre {
+      margin: 0;
+      padding: 14px;
+      background: var(--json-bg);
+      color: var(--json-ink);
+      overflow-x: auto;
+      white-space: pre;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 12px;
+      color: var(--muted);
+      background: #fbfcfd;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .findings {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .finding {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .finding strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 760px) {
+      .wrap { width: min(100vw - 20px, 1100px); }
+      .findings { grid-template-columns: 1fr; }
+      .command pre, details pre { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>niles CRM Command Sessions</h1>
+      <p class="subtitle">Simulated one-by-one command sessions based on the outreach workbook. The workbook is source material for realistic CRM cases, not an import target.</p>
+      <nav aria-label="Sessions">
+        <a href="#setup">Setup</a>
+        <a href="#accounts">Accounts</a>
+        <a href="#people">People</a>
+        <a href="#notes">Notes</a>
+        <a href="#debrief">Debrief</a>
+        <a href="#queue">Queue</a>
+        <a href="#intake">Intake</a>
+        <a href="#status-humanize">Status Updates</a>
+        <a href="#recommendations">Recommendations</a>
+        <a href="#team">Team & Tasks</a>
+        <a href="#reports">Reports</a>
+        <a href="#findings">Findings</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h2>Source Patterns</h2>
+      <p class="note">The current spreadsheet approximates a CRM with company rows, separate people rows, dated notes, loose next steps, and occasionally ambiguous names. These sessions show the same work as explicit niles commands.</p>
+      <table>
+        <thead><tr><th>Spreadsheet Pattern</th><th>niles Command Shape</th><th>Stress Point</th></tr></thead>
+        <tbody>
+          <tr><td>Priority 1 company with current status</td><td><code>niles contact add ... --trait priority=1 --tag prospect</code></td><td>Company-as-contact wording is usable, but not elegant.</td></tr>
+          <tr><td>Dated cell such as "Waiting for contract!"</td><td><code>niles note add ... --at 2026-09-01</code></td><td>Historical note timestamps need explicit support.</td></tr>
+          <tr><td>Loose "next step" prose</td><td><code>niles task add ... --due ...</code></td><td>The user needs a low-friction path from note to task.</td></tr>
+          <tr><td>Ambiguous POC names</td><td><code>niles contact show chatterjee</code></td><td>Fuzzy refs must block mutating commands.</td></tr>
+          <tr><td>Ask others for current status</td><td><code>niles status-request publish ...</code></td><td>Humanize should update the CRM only after review.</td></tr>
+          <tr><td>Ask what to do next</td><td><code>niles recommend export ... .ep</code></td><td>niles prepares jobs; <code>ep</code> runs them; niles imports audited results.</td></tr>
+          <tr><td>John / Robin ownership</td><td><code>niles teammate add ...</code></td><td>Tasks need assignees, not just contact-level due dates.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="setup">
+      <h2>Session 1: Start A Local CRM</h2>
+      <p class="note">Initial project setup and a blank status check.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles init</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "init",
+  "argv": ["init"],
+  "data": {
+    "project_root": "/Users/jjhorton/tools/ep/niles",
+    "state_dir": ".niles",
+    "created": [".niles/config.toml", ".niles/events/", ".niles/index/niles.sqlite", ".niles/surveys/"]
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add a priority account", "command": "niles contact add \"Google Deepmind\" --tag prospect --trait priority=1", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles status</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "status",
+  "argv": ["status"],
+  "data": {"contacts": 0, "notes": 0, "open_tasks": 0, "pending_intake": 0, "network_required": false},
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add contacts", "command": "niles contact add \"Google Deepmind\" --tag prospect", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="accounts">
+      <h2>Session 2: Add Priority Accounts One By One</h2>
+      <p class="note">The workbook's prospect rows become contact records tagged and traited as accounts.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add "Google Deepmind" --tag prospect --tag target-company --trait kind=account --trait priority=1 --cadence-days 7</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Google Deepmind", "--tag", "prospect", "--tag", "target-company", "--trait", "kind=account", "--trait", "priority=1", "--cadence-days", "7"],
+  "data": {
+    "contact": {"id": "01K3ZGOOGLEDEEPMIND", "name": "Google Deepmind", "tags": ["prospect", "target-company"], "cadence_days": 7, "traits": {"kind": "account", "priority": 1}},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add initial note", "command": "niles note add google-deepmind \"Will prepare a demo of capabilities\" --kind note --at 2026-06-10", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add Upwork --tag prospect --trait kind=account --trait priority=1 --cadence-days 7</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Upwork", "--tag", "prospect", "--trait", "kind=account", "--trait", "priority=1", "--cadence-days", "7"],
+  "data": {
+    "contact": {"id": "01K3ZUPWORKACCOUNT", "name": "Upwork", "tags": ["prospect"], "cadence_days": 7, "traits": {"kind": "account", "priority": 1}},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add people at Upwork", "command": "niles contact add \"Bryant Meckley\" --company Upwork --tag poc", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add Mercari --tag prospect --trait kind=account --trait priority=1 --cadence-days 14</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Mercari", "--tag", "prospect", "--trait", "kind=account", "--trait", "priority=1", "--cadence-days", "14"],
+  "data": {
+    "contact": {"id": "01K3ZMERCARIACCOUNT", "name": "Mercari", "tags": ["prospect"], "cadence_days": 14, "traits": {"kind": "account", "priority": 1}},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Record pilot status", "command": "niles note add mercari \"Pilot ends in a month. We'll prepare proposal.\" --kind note", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="people">
+      <h2>Session 3: Add People And Connect Them To Accounts</h2>
+      <p class="note">People from the outreach list become ordinary contacts with company fields and relationship notes.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add "Nils Wernerfelt" --company Meta --tag poc --tag target-company --trait met_via=Northwestern --trait ask="Try to get demo at Meta surveys team" --cadence-days 14</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Nils Wernerfelt", "--company", "Meta", "--tag", "poc", "--tag", "target-company", "--trait", "met_via=Northwestern", "--trait", "ask=Try to get demo at Meta surveys team", "--cadence-days", "14"],
+  "data": {
+    "contact": {"id": "01K3ZNILSWERNERFELT", "name": "Nils Wernerfelt", "company": "Meta", "tags": ["poc", "target-company"], "traits": {"met_via": "Northwestern", "ask": "Try to get demo at Meta surveys team"}},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Create follow-up", "command": "niles task add nils-wernerfelt \"Ask for intro to Meta surveys team\" --due 2026-09-05", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add "Igor Popov" --company Airbnb --tag poc --trait team="public policy" --cadence-days 21</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Igor Popov", "--company", "Airbnb", "--tag", "poc", "--trait", "team=public policy", "--cadence-days", "21"],
+  "data": {
+    "contact": {"id": "01K3ZIGORPOPOV", "name": "Igor Popov", "company": "Airbnb", "tags": ["poc"], "traits": {"team": "public policy"}},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add note", "command": "niles note add igor-popov \"On public policy team.\" --kind note", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add "Ronnie Chatterjee" --company OpenAI --tag poc --trait source=outreach</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Ronnie Chatterjee", "--company", "OpenAI", "--tag", "poc", "--trait", "source=outreach"],
+  "data": {
+    "contact": {"id": "01K3ZRONNIECHATTERJEE", "name": "Ronnie Chatterjee", "company": "OpenAI", "tags": ["poc"], "traits": {"source": "outreach"}},
+    "events_written": 1
+  },
+  "warnings": [{"code": "possible_duplicate", "message": "Similar target POC found: Robbie Chatterjee at OpenAI."}],
+  "errors": [],
+  "next_steps": [
+    {"label": "Resolve possible duplicate", "command": "niles contact show chatterjee", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="notes">
+      <h2>Session 4: Add Historical Notes And Tasks</h2>
+      <p class="note">This directly replaces writing updates into dated cells. Each command says whether the item is a record of what happened or a future obligation.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles note add google-deepmind "Will prepare a demo of capabilities" --kind note --at 2026-06-10</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "note add",
+  "argv": ["note", "add", "google-deepmind", "Will prepare a demo of capabilities", "--kind", "note", "--at", "2026-06-10"],
+  "data": {
+    "note": {"id": "01K3ZNOTEGOOGLE001", "contact_id": "01K3ZGOOGLEDEEPMIND", "kind": "note", "created_at": "2026-06-10T00:00:00Z"},
+    "events_written": 1
+  },
+  "warnings": [{"code": "historical_timestamp", "message": "Note timestamp is before current date 2026-09-01."}],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add next step", "command": "niles task add google-deepmind \"Schedule Deepmind demo\" --due 2026-06-24", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles task add google-deepmind "Schedule Deepmind demo" --due 2026-06-24</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "task add",
+  "argv": ["task", "add", "google-deepmind", "Schedule Deepmind demo", "--due", "2026-06-24"],
+  "data": {
+    "task": {"id": "task-google-demo", "contact_id": "01K3ZGOOGLEDEEPMIND", "due_date": "2026-06-24", "text": "Schedule Deepmind demo", "status": "open"},
+    "events_written": 1
+  },
+  "warnings": [{"code": "past_due", "message": "Due date is before current date 2026-09-01."}],
+  "errors": [],
+  "next_steps": [
+    {"label": "Mark done if completed", "command": "niles task done task-google-demo", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles note add google-deepmind "Waiting for contract!" --kind note --at 2026-09-01</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "note add",
+  "argv": ["note", "add", "google-deepmind", "Waiting for contract!", "--kind", "note", "--at", "2026-09-01"],
+  "data": {
+    "note": {"id": "01K3ZNOTEGOOGLE006", "contact_id": "01K3ZGOOGLEDEEPMIND", "kind": "note", "created_at": "2026-09-01T00:00:00Z"},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Create contract follow-up", "command": "niles task add google-deepmind \"Check contract status\" --due 2026-09-04", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles note add kora-cap "Meeting with Eugenie today - show the prompt library. Need to improve bilingual AI interviewer." --kind meeting --at 2026-06-26</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "error",
+  "command": "note add",
+  "argv": ["note", "add", "kora-cap", "Meeting with Eugenie today - show the prompt library. Need to improve bilingual AI interviewer.", "--kind", "meeting", "--at", "2026-06-26"],
+  "data": {"ref": "kora-cap", "candidates": []},
+  "warnings": [],
+  "errors": [{"code": "unknown_contact", "message": "No contact matched 'kora-cap'."}],
+  "next_steps": [
+    {"label": "Create Kora Cap account", "command": "niles contact add \"Kora Cap\" --tag prospect --trait kind=account --trait priority=1", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles contact add "Kora Cap" --tag prospect --trait kind=account --trait priority=1 --cadence-days 7</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "contact add",
+  "argv": ["contact", "add", "Kora Cap", "--tag", "prospect", "--trait", "kind=account", "--trait", "priority=1", "--cadence-days", "7"],
+  "data": {
+    "contact": {"id": "01K3ZKORACAPACCOUNT", "name": "Kora Cap", "tags": ["prospect"], "traits": {"kind": "account", "priority": 1}},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Retry note add", "command": "niles note add kora-cap \"Meeting with Eugenie today - show the prompt library. Need to improve bilingual AI interviewer.\" --kind meeting --at 2026-06-26", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles task add kora-cap "Send clean RA session using runway HTML survey and Gabriel Qualtrics conversion example" --due 2026-09-05</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "task add",
+  "argv": ["task", "add", "kora-cap", "Send clean RA session using runway HTML survey and Gabriel Qualtrics conversion example", "--due", "2026-09-05"],
+  "data": {
+    "task": {"id": "task-kora-clean-ra-session", "contact_id": "01K3ZKORACAPACCOUNT", "due_date": "2026-09-05", "text": "Send clean RA session using runway HTML survey and Gabriel Qualtrics conversion example", "status": "open"},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Show Kora Cap", "command": "niles contact show kora-cap", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="debrief">
+      <h2>Session 5: Use A Debrief Survey After An Interaction</h2>
+      <p class="note">The user answers a short EDSL survey in the terminal. niles applies only the closed routing actions.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles note add upwork "Meeting with Michelle Sawa about MCP and contract path" --kind meeting --debrief</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "note add",
+  "argv": ["note", "add", "upwork", "Meeting with Michelle Sawa about MCP and contract path", "--kind", "meeting", "--debrief"],
+  "data": {
+    "contact": {"id": "01K3ZUPWORKACCOUNT", "name": "Upwork"},
+    "note": {"id": "01K3ZNOTEUPWORK010", "kind": "meeting", "created_at": "2026-09-01T16:21:00Z"},
+    "survey": {
+      "name": "debrief",
+      "answers": {
+        "sentiment": "positive",
+        "summary": "Michelle wants a short proposal and a clean path to contract signature.",
+        "next_step": "Draft proposal and send to Whitney and Hayden.",
+        "next_by": "2026-09-03",
+        "outcome": "advance"
+      }
+    },
+    "routed_mutations": [
+      {"action": "set_trait", "trait": "last_sentiment", "value": "positive"},
+      {"action": "append_note", "kind": "debrief", "text": "Michelle wants a short proposal and a clean path to contract signature."},
+      {"action": "create_task", "text": "Draft proposal and send to Whitney and Hayden.", "due_date": "2026-09-03"}
+    ],
+    "events_written": 4
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Review Upwork commitments", "command": "niles task list --contact upwork", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles survey run debrief --contact mckinsey --answers '{"sentiment":"mixed","summary":"Dave may engage if we can show a non-sensitive RA workflow.","next_step":"Reply with offer to build a public demo RA session and ask for realistic phases.","next_by":"2026-09-02","outcome":"needs-materials"}'</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "survey run",
+  "argv": ["survey", "run", "debrief", "--contact", "mckinsey", "--answers", "{...}"],
+  "data": {
+    "contact": {"id": "01K3ZMCKINSEYACCOUNT", "name": "McKinsey"},
+    "applied_routes": [
+      {"action": "set_trait", "trait": "last_sentiment", "value": "mixed"},
+      {"action": "append_note", "kind": "debrief", "text": "Dave may engage if we can show a non-sensitive RA workflow."},
+      {"action": "create_task", "text": "Reply with offer to build a public demo RA session and ask for realistic phases.", "due_date": "2026-09-02"},
+      {"action": "noop", "question": "outcome", "answer": "needs-materials"}
+    ],
+    "events_written": 4
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Preview next survey run", "command": "niles survey run debrief --contact mckinsey --dry-run", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="queue">
+      <h2>Session 6: Work The Daily Queue</h2>
+      <p class="note">This replaces scanning the sheet. Status is a query over projected state; decisions are explicit commands.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles task list --due today --tag prospect --sort priority</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "task list",
+  "argv": ["task", "list", "--due", "today", "--tag", "prospect", "--sort", "priority"],
+  "data": {
+    "as_of": "2026-09-01",
+    "tasks": [
+      {"id": "task-upwork-eb-meeting", "contact": "Upwork", "priority": 1, "due_date": "2026-09-01", "text": "Meeting with EB on Wed 7/15"},
+      {"id": "task-autodesk-meeting", "contact": "Autodesk", "priority": 2, "due_date": "2026-09-01", "text": "John scheduled meeting"},
+      {"id": "task-workday-reach-out", "contact": "Workday", "priority": 2, "due_date": "2026-09-01", "text": "John to reach out"}
+    ]
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Mark completed task", "command": "niles task done task-upwork-eb-meeting", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles review --stale --priority "&lt;=4" --answers review-decisions.json</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "review",
+  "argv": ["review", "--stale", "--priority", "&lt;=4", "--answers", "review-decisions.json"],
+  "data": {
+    "decisions": [
+      {"contact": "Etsy", "decision": "follow_up", "task": "Ping Michael Cata with updated ask example", "due_date": "2026-09-08"},
+      {"contact": "Weber Shandwick", "decision": "archive", "reason": "Forget about it"},
+      {"contact": "Bain Consulting", "decision": "wait", "task": "Check whether Luke Stein made intro", "due_date": "2026-09-15"},
+      {"contact": "Sony", "decision": "wait", "task": "Ask Stefan about Anaconda before pinging Danny again", "due_date": "2026-09-10"}
+    ],
+    "events_written": 8
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Inspect archived contacts", "command": "niles contact list --archived", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="intake">
+      <h2>Session 7: Intake Without Spreadsheet Import</h2>
+      <p class="note">The public-facing path still uses EDSL humanize. Pulling responses creates a pending queue; nothing mutates contacts until review.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles intake publish intake-basic --name "Expected Parrot intro request"</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "intake publish",
+  "argv": ["intake", "publish", "intake-basic", "--name", "Expected Parrot intro request"],
+  "data": {
+    "form_id": "human-survey-01K3ZINTAKE000000",
+    "edsl_method": "Survey.humanize",
+    "admin_url": "https://www.expectedparrot.com/home/human-surveys/human-survey-01K3ZINTAKE000000",
+    "respondent_url": "https://www.expectedparrot.com/respond/human-surveys/human-survey-01K3ZINTAKE000000",
+    "survey_uuid": "survey-01K3ZSURVEY000000"
+  },
+  "warnings": [
+    {"code": "privacy.ep_server", "message": "Intake data transits and rests on the Expected Parrot server."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Pull submitted responses", "command": "niles intake pull human-survey-01K3ZINTAKE000000", "mutates": true, "network": true, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles intake pull human-survey-01K3ZINTAKE000000</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "intake pull",
+  "argv": ["intake", "pull", "human-survey-01K3ZINTAKE000000"],
+  "data": {
+    "edsl_method": "Coop.get_human_survey_responses",
+    "edsl_return_type": "ScenarioList",
+    "pulled": 2,
+    "new_pending_submissions": [
+      {"submission_id": "response-meta-surveys-team", "email": "nils@example.com", "matched_contact_id": "01K3ZNILSWERNERFELT", "proposal": "merge"},
+      {"submission_id": "response-netflix-ide-team", "email": null, "matched_contact_id": null, "proposal": "accept_new_contact"}
+    ],
+    "high_water_mark": "2026-09-01T17:18:02Z"
+  },
+  "warnings": [
+    {"code": "edsl_fallback.scenario_list", "message": "EDSL returned raw human responses as ScenarioList; niles preserved raw answers for review."},
+    {"code": "missing_email", "message": "1 submission has no email, so dedup cannot use the primary key."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Review pending intake", "command": "niles intake review", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="status-humanize">
+      <h2>Session 8: Get A Status Update Via Humanize</h2>
+      <p class="note">This flow sends a short humanized survey to a contact or account owner, pulls the response, previews the learned updates, and then commits notes and tasks after review.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles survey copy status-update google-contract-update</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "survey copy",
+  "argv": ["survey", "copy", "status-update", "google-contract-update"],
+  "data": {
+    "survey": {
+      "name": "google-contract-update",
+      "kind": "status-update",
+      "questions": ["current_status", "blockers", "next_owner", "next_step", "next_by"]
+    },
+    "routing": {
+      "current_status": {"action": "append_note", "kind": "intake"},
+      "blockers": {"action": "set_trait", "trait": "latest_blocker"},
+      "next_owner": {"action": "set_trait", "trait": "next_owner"},
+      "next_step": {"action": "create_task"},
+      "next_by": {"action": "task_due", "binds": "next_step"}
+    },
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Publish status survey", "command": "niles status-request publish google-contract-update --contact google-deepmind --recipient robin-horton", "mutates": true, "network": true, "requires_approval": true}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles status-request publish google-contract-update --contact google-deepmind --recipient robin-horton --expires 2026-09-08</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "status-request publish",
+  "argv": ["status-request", "publish", "google-contract-update", "--contact", "google-deepmind", "--recipient", "robin-horton", "--expires", "2026-09-08"],
+  "data": {
+    "contact": {"id": "01K3ZGOOGLEDEEPMIND", "name": "Google Deepmind"},
+    "recipient": {"id": "team-robin-horton", "name": "Robin Horton"},
+    "form_id": "human-survey-01K3ZSTATUSGOOGLE",
+    "edsl_method": "Survey.humanize",
+    "respondent_url": "https://www.expectedparrot.com/respond/human-surveys/human-survey-01K3ZSTATUSGOOGLE",
+    "admin_url": "https://www.expectedparrot.com/home/human-surveys/human-survey-01K3ZSTATUSGOOGLE"
+  },
+  "warnings": [
+    {"code": "privacy.ep_server", "message": "Status-update responses transit and rest on the Expected Parrot server."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Pull status responses", "command": "niles status-request pull human-survey-01K3ZSTATUSGOOGLE", "mutates": true, "network": true, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles status-request pull human-survey-01K3ZSTATUSGOOGLE</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "status-request pull",
+  "argv": ["status-request", "pull", "human-survey-01K3ZSTATUSGOOGLE"],
+  "data": {
+    "pulled": 1,
+    "pending_updates": [
+      {
+        "update_id": "status-response-01K3ZGOOGLE001",
+        "contact": "Google Deepmind",
+        "respondent": "Robin Horton",
+        "answers": {
+          "current_status": "Contract is with their legal team. They asked for a security appendix and a shorter demo deck.",
+          "blockers": "Security review and a cleaner capabilities deck.",
+          "next_owner": "John Horton",
+          "next_step": "Send security appendix and condensed deck.",
+          "next_by": "2026-09-03"
+        }
+      }
+    ]
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Preview CRM mutations", "command": "niles status-request review status-response-01K3ZGOOGLE001 --dry-run", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles status-request review status-response-01K3ZGOOGLE001 --accept</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "status-request review",
+  "argv": ["status-request", "review", "status-response-01K3ZGOOGLE001", "--accept"],
+  "data": {
+    "contact": {"id": "01K3ZGOOGLEDEEPMIND", "name": "Google Deepmind"},
+    "applied_routes": [
+      {"action": "append_note", "kind": "intake", "source": "status-response-01K3ZGOOGLE001", "text": "Contract is with their legal team. They asked for a security appendix and a shorter demo deck."},
+      {"action": "set_trait", "trait": "latest_blocker", "value": "Security review and a cleaner capabilities deck."},
+      {"action": "set_trait", "trait": "next_owner", "value": "John Horton"},
+      {"action": "create_task", "assignee": "John Horton", "text": "Send security appendix and condensed deck.", "due_date": "2026-09-03"}
+    ],
+    "events_written": 4
+  },
+  "warnings": [
+    {"code": "human_response_reviewed", "message": "Learned update was applied only after explicit review."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Show Google Deepmind", "command": "niles contact show google-deepmind", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="recommendations">
+      <h2>Session 9: Get Recommendations For Best Next Steps</h2>
+      <p class="note">This v2-style flow exports an EDSL job bundle over CRM scenarios. niles does not run the model job; <code>ep</code> runs the <code>.ep</code> artifact, then niles imports the returned results for review.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles recommend export next-steps --tag prospect --priority "&lt;=2" --output .niles/jobs/next-steps-2026-09-01.ep</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "recommend export",
+  "argv": ["recommend", "export", "next-steps", "--tag", "prospect", "--priority", "&lt;=2", "--output", ".niles/jobs/next-steps-2026-09-01.ep"],
+  "data": {
+    "artifact": ".niles/jobs/next-steps-2026-09-01.ep",
+    "artifact_type": "edsl_job_bundle",
+    "scenario_count": 10,
+    "scenario_projection": "ContactList.to_scenario_list()",
+    "questions": ["recommended_action", "reason", "urgency", "draft_message"],
+    "includes": ["survey.to_dict", "scenario_list.to_dict", "routing_contract.json"],
+    "mutates_crm": false,
+    "run_by": "ep"
+  },
+  "warnings": [
+    {"code": "v2_boundary", "message": "niles exported the job but did not execute model calls. Imported results must be reviewed before any CRM mutation."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Run with ep", "command": "ep run .niles/jobs/next-steps-2026-09-01.ep --output .niles/results/next-steps-2026-09-01.results.json", "mutates": false, "network": true, "requires_approval": true}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">ep run .niles/jobs/next-steps-2026-09-01.ep --output .niles/results/next-steps-2026-09-01.results.json</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "ep.run.v1",
+  "status": "ok",
+  "command": "ep run",
+  "argv": ["run", ".niles/jobs/next-steps-2026-09-01.ep", "--output", ".niles/results/next-steps-2026-09-01.results.json"],
+  "data": {
+    "job_id": "ep-job-01K3ZNEXTSTEPS",
+    "input_artifact": ".niles/jobs/next-steps-2026-09-01.ep",
+    "output": ".niles/results/next-steps-2026-09-01.results.json",
+    "remote_inference": true,
+    "results_type": "edsl.Results",
+    "results_visibility": "private"
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Import results into niles review queue", "command": "niles recommend import .niles/results/next-steps-2026-09-01.results.json --dry-run"}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles recommend import .niles/results/next-steps-2026-09-01.results.json --dry-run</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "recommend import",
+  "argv": ["recommend", "import", ".niles/results/next-steps-2026-09-01.results.json", "--dry-run"],
+  "data": {
+    "source": ".niles/results/next-steps-2026-09-01.results.json",
+    "edsl_return_type": "Results",
+    "imported_recommendations": 10,
+    "recommendations": [
+      {
+        "contact": "Google Deepmind",
+        "recommended_action": "Send security appendix and condensed capabilities deck",
+        "urgency": "high",
+        "reason": "Latest update says contract is blocked on security review and deck quality.",
+        "would_create_task": true
+      },
+      {
+        "contact": "Mercari",
+        "recommended_action": "Send a renewal proposal before the 2026-09-12 pilot extension ends",
+        "urgency": "high",
+        "reason": "Latest state is negotiating contract and pilot has an end date.",
+        "would_create_task": true
+      },
+      {
+        "contact": "Parrot Analytics",
+        "recommended_action": "Wait until Ale's expected follow-up window closes, then send a low-friction example",
+        "urgency": "medium",
+        "reason": "Prior note says no update expected for up to one month.",
+        "would_create_task": false
+      }
+    ]
+  },
+  "warnings": [
+    {"code": "recommendations_unapplied", "message": "No CRM records were changed because this was a dry run."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Import into review queue", "command": "niles recommend import .niles/results/next-steps-2026-09-01.results.json", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles recommend import .niles/results/next-steps-2026-09-01.results.json</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "recommend import",
+  "argv": ["recommend", "import", ".niles/results/next-steps-2026-09-01.results.json"],
+  "data": {
+    "queued_recommendations": 10,
+    "queue": "recommendations",
+    "source_artifact": ".niles/jobs/next-steps-2026-09-01.ep",
+    "source_results": ".niles/results/next-steps-2026-09-01.results.json",
+    "events_written": 1
+  },
+  "warnings": [
+    {"code": "review_required", "message": "Recommendations are pending. No contact, note, task, or task was changed."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Accept a recommendation", "command": "niles recommend accept rec-google-deepmind-001 --assign john-horton --due 2026-09-03", "mutates": true, "network": false, "requires_approval": true}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles recommend accept rec-google-deepmind-001 --assign john-horton --due 2026-09-03</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "recommend accept",
+  "argv": ["recommend", "accept", "rec-google-deepmind-001", "--assign", "john-horton", "--due", "2026-09-03"],
+  "data": {
+    "recommendation_id": "rec-google-deepmind-001",
+    "applied_routes": [
+      {"action": "append_note", "kind": "recommendation", "text": "Recommended next step: send security appendix and condensed capabilities deck."},
+      {"action": "create_task", "assignee": "John Horton", "text": "Send security appendix and condensed capabilities deck", "due_date": "2026-09-03"}
+    ],
+    "events_written": 2
+  },
+  "warnings": [
+    {"code": "llm_provenance", "message": "Recommendation provenance is linked to .niles/jobs/next-steps-2026-09-01.ep and .niles/results/next-steps-2026-09-01.results.json."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Show John's tasks", "command": "niles task list --assignee john-horton", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="team">
+      <h2>Session 10: Add Company Context, People, And Task Ownership</h2>
+      <p class="note">The workbook uses initials like JJH and RBY. niles needs explicit team members and project context so ownership, recommendations, and reports are intelligible.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles org set --name "Expected Parrot" --context "We sell EDSL, Research Agent, human surveys, remote inference, and custom AI research workflows."</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "org set",
+  "argv": ["org", "set", "--name", "Expected Parrot", "--context", "We sell EDSL, Research Agent, human surveys, remote inference, and custom AI research workflows."],
+  "data": {
+    "org": {
+      "name": "Expected Parrot",
+      "context": "We sell EDSL, Research Agent, human surveys, remote inference, and custom AI research workflows."
+    },
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Add teammates", "command": "niles teammate add \"John Horton\" --alias JJH", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles teammate add "John Horton" --alias john --alias JJH --role founder</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "teammate add",
+  "argv": ["teammate", "add", "John Horton", "--alias", "john", "--alias", "JJH", "--role", "founder"],
+  "data": {
+    "teammate": {"id": "team-john-horton", "name": "John Horton", "aliases": ["john", "JJH"], "role": "founder"},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Assign a task", "command": "niles task add google-deepmind \"Send security appendix\" --assign john --due 2026-09-03", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles teammate add "Robin Horton" --alias robin --alias RBY --role founder</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "teammate add",
+  "argv": ["teammate", "add", "Robin Horton", "--alias", "robin", "--alias", "RBY", "--role", "founder"],
+  "data": {
+    "teammate": {"id": "team-robin-horton", "name": "Robin Horton", "aliases": ["robin", "RBY"], "role": "founder"},
+    "events_written": 1
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "List teammates", "command": "niles teammate list", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles task add kora-cap "Send clean RA session using runway HTML survey and Gabriel Qualtrics conversion example" --assign robin --due 2026-09-05 --tag sales-materials</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "task add",
+  "argv": ["task", "add", "kora-cap", "Send clean RA session using runway HTML survey and Gabriel Qualtrics conversion example", "--assign", "robin", "--due", "2026-09-05", "--tag", "sales-materials"],
+  "data": {
+    "task": {
+      "id": "task-kora-clean-ra-session",
+      "contact_id": "01K3ZKORACAPACCOUNT",
+      "assignee": "Robin Horton",
+      "due_date": "2026-09-05",
+      "text": "Send clean RA session using runway HTML survey and Gabriel Qualtrics conversion example",
+      "tags": ["sales-materials"],
+      "status": "open"
+    },
+    "events_written": 1
+  },
+  "warnings": [
+    {"code": "task_model_selected", "message": "Task is the v1 model for assigned work and due-date reminders."}
+  ],
+  "errors": [],
+  "next_steps": [
+    {"label": "Show Robin's tasks", "command": "niles task list --assignee robin", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles task list --assignee john --due this-week --status open</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "task list",
+  "argv": ["task", "list", "--assignee", "john", "--due", "this-week", "--status", "open"],
+  "data": {
+    "tasks": [
+      {"id": "task-google-security-appendix", "contact": "Google Deepmind", "assignee": "John Horton", "due_date": "2026-09-03", "status": "open", "text": "Send security appendix and condensed capabilities deck"},
+      {"id": "task-mckinsey-demo-reply", "contact": "McKinsey", "assignee": "John Horton", "due_date": "2026-09-02", "status": "open", "text": "Reply with offer to build a public demo RA session and ask for realistic phases"}
+    ]
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Complete task", "command": "niles task done task-mckinsey-demo-reply --note \"Sent Dave a public RA demo offer and asked for realistic workflow phases.\"", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="reports">
+      <h2>Session 11: Lightweight Reporting</h2>
+      <p class="note">Reports should be read-only projections over events and tasks, with both human and JSON-friendly forms.</p>
+
+      <div class="command">
+        <pre><code class="language-bash">niles report pipeline --group priority --format markdown --since 2026-07-01</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "report pipeline",
+  "argv": ["report", "pipeline", "--group", "priority", "--format", "markdown", "--since", "2026-07-01"],
+  "data": {
+    "format": "markdown",
+    "report": "# Pipeline Report\n\n## Priority 1\n- Google Deepmind: Waiting for contract; John owns security appendix by 2026-09-03.\n- Upwork: Signing contract soon; proposal follow-up open.\n- Mercari: Negotiating contract; pilot extension ends 2026-09-12.\n- Kora Cap: Waiting on clean RA session; Robin owns materials by 2026-09-05.\n- Keystone: Still waiting; review whether to keep active.\n\n## Priority 2\n- McKinsey: Needs non-sensitive public RA demo offer.\n- Workday: John to reach out.\n- Autodesk: Meeting scheduled.\n"
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Export report", "command": "niles report pipeline --group priority --format markdown --output reports/pipeline-2026-09-01.md", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles report activity --assignee robin --since 2026-06-01 --until 2026-09-01</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "report activity",
+  "argv": ["report", "activity", "--assignee", "robin", "--since", "2026-06-01", "--until", "2026-09-01"],
+  "data": {
+    "assignee": "Robin Horton",
+    "period": {"since": "2026-06-01", "until": "2026-09-01"},
+    "counts": {"notes": 18, "tasks_created": 9, "tasks_done": 5, "status_requests_sent": 2},
+    "highlights": [
+      {"contact": "Kora Cap", "summary": "Met Eugenie, discussed prompt library and bilingual AI interviewer."},
+      {"contact": "American Futures", "summary": "Sent examples and offered another how-to session."},
+      {"contact": "Parrot Analytics", "summary": "Emailed examples and waiting on Ale."}
+    ]
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Show open Robin tasks", "command": "niles task list --assignee robin --status open", "mutates": false, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+
+      <div class="command">
+        <pre><code class="language-bash">niles report neglect --cadence --limit 10</code></pre>
+        <details>
+          <summary>Show output</summary>
+          <pre>{
+  "schema_version": "niles.envelope.v1",
+  "status": "ok",
+  "command": "report neglect",
+  "argv": ["report", "neglect", "--cadence", "--limit", "10"],
+  "data": {
+    "as_of": "2026-09-01",
+    "contacts": [
+      {"contact": "Abercrombie", "priority": 4, "last_touched": "2026-06-11", "cadence_days": 30, "days_overdue": 52},
+      {"contact": "Etsy", "priority": 4, "last_touched": "2026-06-24", "cadence_days": 30, "days_overdue": 39},
+      {"contact": "Amazon", "priority": 7, "last_touched": "2026-06-24", "cadence_days": 60, "days_overdue": 9}
+    ]
+  },
+  "warnings": [],
+  "errors": [],
+  "next_steps": [
+    {"label": "Run stale review", "command": "niles review --stale --limit 10", "mutates": true, "network": false, "requires_approval": false}
+  ]
+}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="findings">
+      <h2>Design Findings</h2>
+      <p class="note">Findings from translating the sheet habits into hand-entered CRM commands.</p>
+      <div class="findings">
+        <div class="finding"><strong>No ragged workbook import in v1.</strong> The sheet is a migration aid and design prompt. Keep v1 import narrow: clean CSV with an explicit mapping.</div>
+        <div class="finding"><strong>Historical note timestamps matter.</strong> To recreate dated spreadsheet updates manually, <code>note add --at</code> is more important than broad import support.</div>
+        <div class="finding"><strong>Company rows need language discipline.</strong> If v1 keeps only Contact, examples should consistently mark account-like records with <code>trait.kind=account</code>.</div>
+        <div class="finding"><strong>Debrief routing is the useful abstraction.</strong> It turns loose meeting notes into structured tasks and traits without making the user fill a full CRM form every time.</div>
+        <div class="finding"><strong>Hidden JSON improves readability.</strong> Humans scan commands first; agents and tests can expand the exact envelope when needed.</div>
+        <div class="finding"><strong>Ambiguous refs are unavoidable.</strong> Similar names and companies should produce structured candidate lists and never mutate by fuzzy guess.</div>
+        <div class="finding"><strong>Status requests are intake with a target.</strong> A humanized status-update survey needs the same quarantine and review gate as customer-facing intake.</div>
+        <div class="finding"><strong>Recommendations need an artifact boundary.</strong> The clean shape is export a <code>.ep</code> EDSL job bundle, run it with <code>ep</code>, import results into a review queue, then accept selected recommendations into tasks or notes.</div>
+        <div class="finding"><strong>Tasks replace reminders.</strong> A due-date reminder is just an open task with an optional assignee; keeping one model makes ownership and reporting simpler.</div>
+        <div class="finding"><strong>Company context belongs in local state.</strong> Recommendations and reports need stable org context and teammate aliases such as JJH/RBY without relying on prompt text scattered across jobs.</div>
+        <div class="finding"><strong>Reports are projections.</strong> Pipeline, activity, and neglect reports should be read-only views over events and the index, with export as a convenience rather than new state.</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
