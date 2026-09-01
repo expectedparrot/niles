@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init")
     sub.add_parser("status")
 
+    agent = sub.add_parser("agent")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+    agent_sub.add_parser("next")
+
     contact = sub.add_parser("contact")
     contact_sub = contact.add_subparsers(dest="contact_command", required=True)
     contact_add = contact_sub.add_parser("add")
@@ -123,6 +127,8 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 )
             ],
         )
+    if args.command == "agent":
+        return dispatch_agent(args, argv)
 
     project = Project.open(Path.cwd())
     if args.command == "status":
@@ -146,6 +152,104 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
     if args.command == "task":
         return dispatch_task(project, args, argv)
     raise NilesError("unknown_command", "Unknown command.")
+
+
+def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.agent_command != "next":
+        raise NilesError("unknown_command", "Unknown agent command.")
+
+    try:
+        project = Project.open(Path.cwd())
+        initialized = True
+        project_root = str(project.root)
+        counts = project.counts()
+        next_steps = agent_steps_for_counts(counts)
+    except NilesError as exc:
+        if exc.code != "not_initialized":
+            raise
+        initialized = False
+        project_root = None
+        counts = None
+        next_steps = [
+            NextStep(
+                label="Initialize a CRM project",
+                command="niles init",
+                mutates=True,
+            )
+        ]
+
+    return ok(
+        "agent next",
+        argv,
+        {
+            "initialized": initialized,
+            "project_root": project_root,
+            "counts": counts,
+            "how_it_works": [
+                "Niles is a local-first CRM CLI for agents managing relationship work for a user.",
+                "Durable state lives under .niles/: append-only events are the source of truth; SQLite indexes are rebuildable projections.",
+                "Agents should mutate CRM state only through niles commands, then inspect the JSON envelope returned on stdout.",
+                "Core work is local and offline: contacts, notes, tasks, status, and reports.",
+                "EDSL/EP work is explicit: niles exports .ep jobs or humanize requests, ep runs them, and niles imports reviewed results.",
+            ],
+            "state_contract": {
+                "durable": [".niles/events/", ".niles/config.toml", ".niles/surveys/"],
+                "derived": [".niles/index/niles.sqlite"],
+                "do_not_edit_manually": [".niles/events/"],
+            },
+            "command_contract": {
+                "stdout": "one JSON envelope",
+                "success_field": "status",
+                "error_fields": ["errors[].code", "errors[].message", "next_steps"],
+                "reference_rule": "Use exact ids or unambiguous slugs from prior envelopes for mutations.",
+            },
+            "available_now": [
+                "niles init",
+                "niles status",
+                "niles contact add/show/list",
+                "niles note add",
+                "niles task add/list/done",
+                "niles agent next",
+            ],
+            "planned_edsl_handoff": [
+                "niles status-request export/import",
+                "niles recommend export/import/accept",
+                "niles intake publish/pull/review",
+            ],
+        },
+        next_steps=next_steps,
+    )
+
+
+def agent_steps_for_counts(counts: dict[str, Any]) -> list[NextStep]:
+    if counts["contacts"] == 0:
+        return [
+            NextStep(
+                label="Add the first contact",
+                command='niles contact add "Acme Data" --tag prospect --trait priority=1',
+                mutates=True,
+            )
+        ]
+    if counts["open_tasks"] == 0:
+        return [
+            NextStep(
+                label="Add a next-step task",
+                command='niles task add <contact-ref> "Follow up" --due YYYY-MM-DD --assign john',
+                mutates=True,
+            )
+        ]
+    return [
+        NextStep(
+            label="Review open tasks",
+            command="niles task list --status open",
+            mutates=False,
+        ),
+        NextStep(
+            label="Check CRM status",
+            command="niles status",
+            mutates=False,
+        ),
+    ]
 
 
 def dispatch_contact(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
@@ -216,7 +320,7 @@ def command_name(args: argparse.Namespace) -> str:
     parts = []
     if getattr(args, "command", None):
         parts.append(args.command)
-    for attr in ("contact_command", "note_command", "task_command"):
+    for attr in ("agent_command", "contact_command", "note_command", "task_command"):
         value = getattr(args, attr, None)
         if value:
             parts.append(value)

@@ -35,6 +35,22 @@ def test_init_and_status(tmp_path, monkeypatch):
     assert payload["data"]["open_tasks"] == 0
 
 
+def test_agent_next_before_and_after_init(tmp_path):
+    code, payload = run_niles(tmp_path, "agent", "next")
+    assert code == 0
+    assert payload["status"] == "ok"
+    assert payload["data"]["initialized"] is False
+    assert payload["next_steps"][0]["command"] == "niles init"
+
+    assert run_niles(tmp_path, "init")[0] == 0
+
+    code, payload = run_niles(tmp_path, "agent", "next")
+    assert code == 0
+    assert payload["data"]["initialized"] is True
+    assert "how_it_works" in payload["data"]
+    assert payload["next_steps"][0]["command"].startswith("niles contact add")
+
+
 def test_contact_note_task_flow(tmp_path):
     code, payload = run_niles(
         tmp_path,
