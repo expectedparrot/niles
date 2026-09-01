@@ -1,0 +1,333 @@
+# niles — local-first CRM CLI with EDSL-powered surveys and intake
+
+> Package and CLI executable: **niles**.
+
+**Status:** Draft v0.1 · **Target:** v1 scope only unless marked otherwise.
+
+---
+
+## 1. Purpose
+
+niles is a local-first CLI and Python library for managing a network of
+contacts: who you know, your history with them, what you promised, and who
+you are neglecting. It uses EDSL as its survey substrate in three ways:
+
+1. **Internal check-in surveys** — structured prompts the *user* answers in
+   the terminal (post-interaction debriefs, periodic reviews) whose answers
+   route directly into the data model.
+2. **Customer-facing intake forms** — the same Survey objects published via
+   EDSL's `humanize()` to collect submissions from third parties, which are
+   pulled, reviewed, and materialized as contacts.
+3. **(v2) LLM operations** — enrichment, labeling, and summarization packaged
+   as EDSL Jobs, following the bewley rule: niles *prepares* jobs and
+   *ingests* audited results, but never executes model calls itself.
+
+The core loop it must make effortless: log an interaction → answer a short
+debrief → next steps become reminders → staleness surfaces neglected
+contacts → a review survey processes them.
+
+## 2. Design principles (ecosystem conventions)
+
+Follow bewley's conventions unless a CRM-specific reason forces a deviation:
+
+- **Local-first.** All durable state lives in a project directory under
+  `.niles/`. No server dependency for core operation. Network is used only
+  for explicitly-invoked intake publish/pull (and v2 LLM jobs).
+- **Event log as source of truth.** `.niles/events/` is an append-only log of
+  every mutation. `.niles/index/niles.sqlite` is a rebuildable projection
+  (`niles rebuild-index`). `niles fsck` verifies integrity. `niles history` and
+  `niles undo` inspect and compensate events; nothing silently repairs,
+  replaces, or deletes registered events. For a CRM this doubles as the
+  interaction audit trail, and makes "when did this field change and why"
+  answerable — including "this field was set by intake submission X."
+- **Agent-first output contract.** Every command emits exactly one versioned
+  JSON envelope to stdout: `schema_version`, `status` (`ok`/`error`),
+  `command`, `argv`, `data`, `warnings`, `errors`, `next_steps`. Failures
+  exit nonzero with structured errors. Each `next_steps` entry declares
+  `mutates`, `network`, and `requires_approval` flags. Human-readable output
+  is opt-in via `--human`/`-H`. `niles capabilities` and
+  `niles agent schema envelope` expose the contract; versioned JSON Schemas
+  ship with the package.
+- **State-aware guidance.** `niles guide` explains the lifecycle;
+  `niles next` recommends the next action given current state (e.g. "3 intake
+  submissions pending review", "5 contacts stale past cadence").
+- **EDSL objects at the boundaries.** Surveys are EDSL `Survey` objects.
+  Intake results arrive in EDSL's Results format. Contacts export to
+  `ScenarioList` (and, v2, to `AgentList`). Everything supports
+  `to_dict`/`from_dict`.
+- **Delegated auth.** EDSL/`ep` owns Expected Parrot authentication. niles
+  never stores, prints, or inspects keys; it checks `ep` availability and
+  auth status before any command that needs the EP server, and reports a
+  structured error with remediation steps if absent.
+- **Packaging.** `pyproject.toml` + `uv`, `src/niles/` layout, `tests/`,
+  `Makefile`, `AGENTS.md`/`CLAUDE.md`, `SPEC.md` (this file), `design/` for
+  design notes. Python 3.11+. MIT license.
+
+## 3. Concepts and data model
+
+All entities are event-sourced; the fields below describe the projected
+(indexed) shape. All ids are stable ULIDs. All timestamps are ISO-8601 UTC.
+
+### 3.1 Contact
+
+- `id`
+- `name` (required, the only required field)
+- `emails: list[str]`, `phones: list[str]` — lists, because people have
+  several; first entry is primary. Emails are the dedup key for intake.
+- `company`, `role` — plain optional strings.
+- `traits: dict[str, str|num|bool]` — open-ended extras ("timezone",
+  "met_at", "spouse"). Mirrors EDSL `Agent(traits=...)`; this is what
+  `to_scenario_list()` / (v2) `to_agent()` project from.
+- `tags: list[str]` — freeform, lowercase, no hierarchy in v1.
+- `cadence_days: int | null` — desired contact frequency; drives staleness.
+- `archived: bool` — soft delete. `niles contact delete --hard` exists for
+  genuine erasure (privacy requests) and logs a redaction event.
+- Derived, not stored: `last_touched` (max timestamp of notes/interactions),
+  `staleness` (`now - last_touched` vs `cadence_days` or a global default).
+
+### 3.2 Note (interaction record)
+
+- `id`, `contact_id`, `created_at`
+- `kind`: `note | call | meeting | email | intake | debrief` — `intake` and
+  `debrief` mark machine-written notes so provenance is always visible.
+- `text`
+- `source`: `user | routing | import` plus a pointer (e.g. submission id,
+  survey response id) when not user-typed.
+
+### 3.3 Reminder
+
+- `id`, `contact_id | null` (null = general todo), `due_date`, `text`,
+  `done: bool`, `source` (as above — a reminder created by a debrief answer
+  points at that response).
+
+### 3.4 Survey definitions
+
+A niles survey definition = an EDSL `Survey` + a **routing map** (§5).
+Stored as versioned objects under `.niles/surveys/` with ids and names.
+Two kinds:
+
+- **Templates** shipped with the package: `debrief` (post-interaction),
+  `review` (stale-contact triage), `intake-basic` (name/email/company/
+  message). Users copy and edit (`niles survey copy debrief my-debrief`).
+- **User-defined**: authored in Python against the library API or imported
+  from a serialized dict.
+
+v1 surveys are static (no LLM-generated questions). Skip logic uses EDSL's
+native skip/stop rules (e.g. answering "archive" in a review skips the
+follow-ups).
+
+### 3.5 Intake submission
+
+- `id`, `form_id`, `received_at`, `raw_answers: dict`
+- `status`: `pending | accepted | merged | rejected`
+- `matched_contact_id | null` — set by dedup when an email matches an
+  existing contact.
+- Submissions are quarantined: nothing writes to contacts until review (§6.3).
+
+## 4. CLI surface (v1)
+
+Verb-noun, mirroring bewley's flat style. All commands emit the JSON
+envelope; representative examples only — full flags via `--help`.
+
+```
+niles init                                  # create project (.niles/)
+niles status                                # counts, stale contacts, pending intake
+niles guide | niles next | niles capabilities
+
+niles contact add "Jane Doe" --email jane@acme.com --company Acme --tag prospect
+niles contact show <ref>                    # ref = id | email | fuzzy name
+niles contact list [--tag t] [--stale] [--json is the default; --human for tables]
+niles contact edit <ref> --set role="CTO" --trait timezone=ET
+niles contact merge <ref-keep> <ref-dup>
+niles contact archive <ref> | niles contact delete <ref> --hard
+
+niles note add <ref> "Called re renewal" [--kind call] [--debrief]
+niles remind add <ref> "Send proposal" --due 2026-09-05
+niles remind list [--due this-week] | niles remind done <id>
+
+niles search <terms>                        # FTS over names, notes, traits
+niles import csv <path> [--mapping m.toml]  # column→field mapping, dry-run default
+niles export csv|json [--tag t]
+
+niles survey list | show | copy | edit
+niles survey run <name> [--contact <ref>]   # interactive terminal Q&A → routed answers
+niles review [--stale]                      # sugar: survey run review over stale contacts
+
+niles intake publish <survey-name>          # humanize() → prints respondent + results links
+niles intake pull [<form-id>]               # fetch new submissions → pending queue
+niles intake review                         # triage: accept / edit / merge / reject
+niles intake status | close <form-id>
+
+niles history [--contact <ref>] | niles undo <event-id>
+niles fsck | niles rebuild-index
+niles version
+```
+
+**Contact references:** exact id wins; exact email wins; otherwise fuzzy name
+match — a unique fuzzy match proceeds, multiple matches return an `error`
+envelope listing candidates (never guess on a mutating command).
+
+**Terminal survey UX:** `niles survey run` renders EDSL questions as
+sequential prompts (numbered options for multiple choice, free text
+otherwise). With `--no-input` it emits the question list instead, so agents
+can drive it via `--answers answers.json`.
+
+## 5. The routing layer
+
+The piece that makes surveys *do* something. A routing map binds each
+`question_name` to a destination:
+
+```toml
+# routing for the "debrief" template
+[route.sentiment]   action = "set_trait"     trait = "last_sentiment"
+[route.summary]     action = "append_note"   kind = "debrief"
+[route.next_step]   action = "create_reminder" text_from = "answer"
+[route.next_by]     action = "reminder_due"  binds = "next_step"
+[route.outcome]     action = "noop"          # recorded in the event log only
+```
+
+Rules:
+
+- **Closed action vocabulary.** v1 actions: `set_field`, `set_trait`,
+  `append_note`, `create_reminder`, `reminder_due`, `add_tag`, `archive`,
+  `noop`. A survey cannot express an action outside this list — this is the
+  containment guarantee that makes intake routing safe, and (v2) makes
+  LLM-generated surveys safe: generation may compose only these actions.
+- **Deterministic and previewable.** `niles survey run --dry-run` and
+  `niles intake review` both show the exact mutations a response would
+  produce before committing. Every applied route logs an event pointing at
+  the response.
+- **Validation at definition time.** `niles survey edit`/import fails fast if
+  a route references a missing question or an unknown action.
+- **Intake restrictions.** Intake routing maps may not use `archive` or
+  `set_field` on protected fields; submissions can only create/annotate,
+  never destroy. Enforced at publish time.
+
+## 6. Intake via humanize
+
+### 6.1 Publish
+
+`niles intake publish <survey>`:
+
+1. Verifies `ep` auth (structured error if absent).
+2. Calls `humanize()` on the Survey; records `form_id`, respondent URL, and
+   results URL in an event.
+3. Prints both links; `requires_approval: true` and `network: true` are set
+   on this step in any `next_steps` that suggest it.
+
+The published form must include a purpose/consent line; the `intake-basic`
+template ships with one and `publish` warns if a custom survey lacks a
+question or description tagged `consent`.
+
+### 6.2 Pull
+
+`niles intake pull` fetches Results newer than the stored high-water mark for
+each open form and writes them to the pending queue. Pull-based only in v1
+(no watch mode). Idempotent: re-pulling never duplicates submissions
+(response ids are the dedup key).
+
+### 6.3 Review queue
+
+`niles intake review` walks pending submissions (itself a survey run):
+
+- Shows raw answers + the previewed mutations from the routing map.
+- Dedup: if a submitted email matches an existing contact, default proposal
+  is **merge** (append note + fill blank fields), never overwrite non-blank
+  fields without an explicit `edit`.
+- Choices: `accept` (apply routes, create/merge contact), `edit` (adjust
+  values, then apply), `reject` (keep the submission event, apply nothing).
+- Nothing reaches the contact store without passing through this gate.
+
+### 6.4 Trust and privacy posture
+
+- Submission text is **untrusted data**. It is stored verbatim, marked with
+  `source: intake`, and never interpolated into any LLM prompt in v1 (there
+  are no LLM calls in v1). v2 LLM features must treat `intake`-sourced text
+  as data-only context and keep any job that reads it read-only or
+  human-approved — this is the prompt-injection boundary.
+- Intake data transits and rests on the Expected Parrot server. README must
+  say this plainly; `niles intake publish` envelope includes a `warnings`
+  entry to the same effect.
+- `niles contact delete --hard` plus `niles intake purge <submission-id>`
+  provide genuine local erasure (logged as redaction events with content
+  removed). Server-side deletion is out of niles's control; document the
+  EP retention story rather than promising more than we can deliver.
+
+## 7. Python library API (v1 sketch)
+
+The CLI is a thin layer; the library is the real interface for notebooks.
+
+```python
+from niles import Project, Contact, ContactList
+
+p = Project.open(".")                      # or Project.init(".")
+c = Contact(name="Jane Doe", emails=["jane@acme.com"],
+            traits={"timezone": "ET"}, tags=["prospect"])
+p.contacts.add(c)
+p.notes.add(c.id, "Intro call", kind="call")
+
+stale = p.contacts.filter(stale=True)      # ContactList
+sl = stale.to_scenario_list()              # EDSL ScenarioList
+
+from niles.surveys import load_template
+debrief = load_template("debrief")         # (Survey, RoutingMap)
+p.run_survey(debrief, contact=c)           # interactive when in a TTY
+```
+
+`Contact`/`ContactList` implement `to_dict`/`from_dict`, rich `__repr__`
+tables, and `ContactList.filter/select/from_csv`. Mutations go through
+`Project` so every change is an event.
+
+## 8. Non-goals for v1 (explicit)
+
+- **Deals/pipeline.** Contacts + tags + traits can approximate it
+  (`tag:lead`, `trait stage=demo`); a first-class Deal entity waits for v2
+  and a decision on whether this is a sales tool at all.
+- **LLM anything**: generated surveys, enrichment, summarization,
+  contacts-as-agents. The routing vocabulary and job-packaging boundary are
+  designed so these bolt on without rework.
+- Email/calendar integration, vCard, multi-user, web dashboard, watch-mode
+  intake, companies as first-class entities.
+
+## 9. v2 direction (informative, not binding)
+
+- `niles enrich` / `niles label`: package EDSL Jobs over `to_scenario_list()`
+  projections (bewley's open-coding pattern: package → external `ep run` →
+  audit → ingest → apply reviewed results via the same routing vocabulary).
+- Context-aware generated follow-up questions in debrief/review, constrained
+  to the closed routing vocabulary.
+- `Contact.to_agent()` for message pretesting, with EDSL's own caveat about
+  simulated responses surfaced in output.
+- Deal entity, per the pipeline decision.
+
+## 10. Open questions
+
+1. **Envelope default for a human tool.** bewley defaults to JSON with
+   `--human` opt-in. A CRM gets far more direct human use than a coding
+   pipeline. Options: (a) follow bewley exactly; (b) auto-detect TTY and
+   default to human rendering there, JSON when piped, with `--json` to
+   force. Spec currently assumes (a) for ecosystem consistency, but (b) is
+   likely the better product. Decide before implementation.
+2. **Global vs per-project store.** bewley projects are per-directory, which
+   suits corpora. A personal CRM is more naturally one global store
+   (`~/.local/share/niles`, `NILES_HOME` override). Spec assumes per-directory
+   `niles init` for convention; revisit if the "one network, many
+   directories" friction bites.
+3. **Pipeline vs network** (deferred from design discussion): the traits
+   system means v1 doesn't force the choice, but the answer shapes v2.
+4. **Humanize surface details** to verify during implementation: closing a
+   form, result pagination/high-water-mark semantics, whether form
+   description text can carry the consent line.
+
+## 11. Milestones
+
+- **M1 — core store.** init/status/fsck/history/undo, events + index,
+  contact/note/remind/search/import/export, staleness. Envelope contract,
+  guide/next, tests.
+- **M2 — surveys + routing.** Survey storage, templates, terminal runner,
+  routing vocabulary + dry-run, `niles review` loop.
+- **M3 — intake.** publish/pull/review/purge, dedup + merge, consent
+  warning, EP auth delegation.
+- **M4 — polish.** Library API surface, `--human` rendering, docs in
+  bewley's README shape (when-to-use / stretch cases / decision rule /
+  worked examples / pitfalls), example dataset (`niles example fetch`).
