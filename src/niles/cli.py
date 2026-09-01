@@ -64,18 +64,47 @@ def build_parser() -> argparse.ArgumentParser:
     contact_add.add_argument("--cadence-days", type=int)
     contact_show = contact_sub.add_parser("show")
     contact_show.add_argument("ref")
+    contact_show.add_argument("--with-notes", action="store_true")
+    contact_show.add_argument("--with-tasks", action="store_true")
     contact_list = contact_sub.add_parser("list")
     contact_list.add_argument("--tag")
     contact_list.add_argument("--stale", action="store_true")
+    contact_update = contact_sub.add_parser("update")
+    contact_update.add_argument("ref")
+    contact_update.add_argument("--name")
+    contact_update.add_argument("--company")
+    contact_update.add_argument("--role")
+    contact_update.add_argument("--cadence-days", type=int)
+    contact_update.add_argument("--trait", action="append", default=[])
+    contact_update.add_argument("--email", action="append", default=[])
+    contact_update.add_argument("--phone", action="append", default=[])
+    contact_tag = contact_sub.add_parser("tag")
+    contact_tag.add_argument("ref")
+    contact_tag.add_argument("--add", action="append", default=[])
+    contact_tag.add_argument("--remove", action="append", default=[])
+    contact_archive = contact_sub.add_parser("archive")
+    contact_archive.add_argument("ref")
+    contact_archive.add_argument("--reason")
+    contact_merge = contact_sub.add_parser("merge")
+    contact_merge.add_argument("keep")
+    contact_merge.add_argument("duplicate")
+    contact_merge.add_argument("--note")
 
     note = sub.add_parser("note")
     note_sub = note.add_subparsers(dest="note_command", required=True)
     note_add = note_sub.add_parser("add")
     note_add.add_argument("ref")
     note_add.add_argument("text")
-    note_add.add_argument("--kind", default="note", choices=["note", "call", "meeting", "email", "intake", "debrief"])
+    note_add.add_argument(
+        "--kind",
+        default="note",
+        choices=["note", "call", "meeting", "email", "intake", "debrief", "enrichment"],
+    )
     note_add.add_argument("--at")
     note_add.add_argument("--debrief", action="store_true")
+    note_list = note_sub.add_parser("list")
+    note_list.add_argument("ref", nargs="?")
+    note_list.add_argument("--limit", type=int)
 
     task = sub.add_parser("task")
     task_sub = task.add_subparsers(dest="task_command", required=True)
@@ -89,9 +118,60 @@ def build_parser() -> argparse.ArgumentParser:
     task_list.add_argument("--due")
     task_list.add_argument("--assignee")
     task_list.add_argument("--status", default="open")
+    task_list.add_argument("--contact")
     task_done = task_sub.add_parser("done")
     task_done.add_argument("id")
     task_done.add_argument("--note")
+    task_update = task_sub.add_parser("update")
+    task_update.add_argument("id")
+    task_update.add_argument("--text")
+    task_update.add_argument("--due")
+    task_update.add_argument("--assign")
+    task_update.add_argument("--status", choices=["open", "done", "blocked", "cancelled"])
+    task_update.add_argument("--tag", action="append", default=[])
+    task_update.add_argument("--remove-tag", action="append", default=[])
+    task_reassign = task_sub.add_parser("reassign")
+    task_reassign.add_argument("id")
+    task_reassign.add_argument("assignee")
+    task_cancel = task_sub.add_parser("cancel")
+    task_cancel.add_argument("id")
+    task_cancel.add_argument("--note")
+    task_suggest = task_sub.add_parser("suggest")
+    task_suggest.add_argument("--assignee")
+
+    org = sub.add_parser("org")
+    org_sub = org.add_subparsers(dest="org_command", required=True)
+    org_context = org_sub.add_parser("context")
+    org_context_sub = org_context.add_subparsers(dest="org_context_command", required=True)
+    org_context_set = org_context_sub.add_parser("set")
+    org_context_set.add_argument("context", nargs="?")
+    org_context_set.add_argument("--name")
+    org_context_set.add_argument("--trait", action="append", default=[])
+    org_context_sub.add_parser("show")
+
+    material = sub.add_parser("material")
+    material_sub = material.add_subparsers(dest="material_command", required=True)
+    material_add = material_sub.add_parser("add")
+    material_add.add_argument("title")
+    material_add.add_argument("--path")
+    material_add.add_argument("--url")
+    material_add.add_argument("--description")
+    material_add.add_argument("--tag", action="append", default=[])
+    material_list = material_sub.add_parser("list")
+    material_list.add_argument("--tag")
+
+    report = sub.add_parser("report")
+    report_sub = report.add_subparsers(dest="report_command", required=True)
+    report_status = report_sub.add_parser("status")
+    report_status.add_argument("--html", required=True)
+
+    enrich = sub.add_parser("enrich")
+    enrich_sub = enrich.add_subparsers(dest="enrich_command", required=True)
+    enrich_ingest = enrich_sub.add_parser("ingest")
+    enrich_ingest.add_argument("ref")
+    enrich_ingest.add_argument("text")
+    enrich_ingest.add_argument("--source-url")
+    enrich_ingest.add_argument("--confidence", type=float)
 
     sub.add_parser("version")
     return parser
@@ -184,6 +264,14 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
         return dispatch_note(project, args, argv)
     if args.command == "task":
         return dispatch_task(project, args, argv)
+    if args.command == "org":
+        return dispatch_org(project, args, argv)
+    if args.command == "material":
+        return dispatch_material(project, args, argv)
+    if args.command == "report":
+        return dispatch_report(project, args, argv)
+    if args.command == "enrich":
+        return dispatch_enrich(project, args, argv)
     raise NilesError("unknown_command", "Unknown command.")
 
 
@@ -222,6 +310,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "Niles is a local-first CRM CLI for agents managing relationship work for a user.",
                 "Durable state lives under .niles/: append-only events are the source of truth; SQLite indexes are rebuildable projections.",
                 "Agents should mutate CRM state only through niles commands, then inspect the JSON envelope returned on stdout.",
+                "Agents should not read .niles/index/niles.sqlite directly; use niles note list, contact show --with-notes, task list, report status, or export instead.",
                 "Core work is local and offline: contacts, notes, tasks, status, and reports.",
                 "EDSL/EP work is explicit: niles exports .ep jobs or humanize requests, ep runs them, and niles imports reviewed results.",
             ],
@@ -240,8 +329,15 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles init",
                 "niles status",
                 "niles contact add/show/list",
+                "niles contact update/tag/archive/merge",
                 "niles note add",
+                "niles note list",
                 "niles task add/list/done",
+                "niles task update/reassign/cancel/suggest",
+                "niles org context set/show",
+                "niles material add/list",
+                "niles report status --html <path>",
+                "niles enrich ingest",
                 "niles export",
                 "niles import",
                 "niles agent next",
@@ -312,13 +408,42 @@ def dispatch_contact(project: Project, args: argparse.Namespace, argv: list[str]
             ],
         )
     if args.contact_command == "show":
-        return ok("contact show", argv, {"contact": project.resolve_contact(args.ref)})
+        return ok(
+            "contact show",
+            argv,
+            {"contact": project.get_contact(args.ref, with_notes=args.with_notes, with_tasks=args.with_tasks)},
+        )
     if args.contact_command == "list":
         return ok(
             "contact list",
             argv,
             {"contacts": project.list_contacts(tag=args.tag, stale=args.stale)},
         )
+    if args.contact_command == "update":
+        return ok(
+            "contact update",
+            argv,
+            project.update_contact(
+                args.ref,
+                name=args.name,
+                company=args.company,
+                role=args.role,
+                cadence_days=args.cadence_days,
+                traits=parse_key_values(args.trait),
+                add_emails=args.email,
+                add_phones=args.phone,
+            ),
+        )
+    if args.contact_command == "tag":
+        return ok(
+            "contact tag",
+            argv,
+            project.update_contact(args.ref, add_tags=args.add, remove_tags=args.remove),
+        )
+    if args.contact_command == "archive":
+        return ok("contact archive", argv, project.archive_contact(args.ref, reason=args.reason))
+    if args.contact_command == "merge":
+        return ok("contact merge", argv, project.merge_contacts(args.keep, args.duplicate, note=args.note))
     raise NilesError("unknown_command", "Unknown contact command.")
 
 
@@ -335,6 +460,8 @@ def dispatch_note(project: Project, args: argparse.Namespace, argv: list[str]) -
         if args.debrief:
             data["debrief"] = {"status": "not_implemented", "message": "Survey routing will be implemented in M3."}
         return ok("note add", argv, data, next_steps=next_steps)
+    if args.note_command == "list":
+        return ok("note list", argv, {"notes": project.list_notes(ref=args.ref, limit=args.limit)})
     raise NilesError("unknown_command", "Unknown note command.")
 
 
@@ -343,19 +470,93 @@ def dispatch_task(project: Project, args: argparse.Namespace, argv: list[str]) -
         data = project.add_task(args.ref, args.text, args.due, args.assign, args.tag)
         return ok("task add", argv, data)
     if args.task_command == "list":
-        data = project.list_tasks(status=args.status, assignee=args.assignee, due=args.due)
+        data = project.list_tasks(status=args.status, assignee=args.assignee, due=args.due, contact_ref=args.contact)
         return ok("task list", argv, {"tasks": data})
     if args.task_command == "done":
         data = project.done_task(args.id, args.note)
         return ok("task done", argv, data)
+    if args.task_command == "update":
+        data = project.update_task(
+            args.id,
+            text=args.text,
+            due_date=args.due,
+            assignee=args.assign,
+            status=args.status,
+            add_tags=args.tag,
+            remove_tags=args.remove_tag,
+        )
+        return ok("task update", argv, data)
+    if args.task_command == "reassign":
+        return ok("task reassign", argv, project.update_task(args.id, assignee=args.assignee))
+    if args.task_command == "cancel":
+        return ok("task cancel", argv, project.update_task(args.id, status="cancelled", note=args.note))
+    if args.task_command == "suggest":
+        return ok("task suggest", argv, {"suggestions": project.suggest_tasks(assignee=args.assignee)})
     raise NilesError("unknown_command", "Unknown task command.")
+
+
+def dispatch_org(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.org_command == "context":
+        if args.org_context_command == "set":
+            return ok(
+                "org context set",
+                argv,
+                project.set_org_context(args.name, args.context, parse_key_values(args.trait)),
+            )
+        if args.org_context_command == "show":
+            return ok("org context show", argv, {"org": project.get_org_context()})
+    raise NilesError("unknown_command", "Unknown org command.")
+
+
+def dispatch_material(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.material_command == "add":
+        return ok(
+            "material add",
+            argv,
+            project.add_material(
+                args.title,
+                path=args.path,
+                url=args.url,
+                description=args.description,
+                tags=args.tag,
+            ),
+        )
+    if args.material_command == "list":
+        return ok("material list", argv, {"materials": project.list_materials(tag=args.tag)})
+    raise NilesError("unknown_command", "Unknown material command.")
+
+
+def dispatch_report(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.report_command == "status":
+        return ok("report status", argv, project.render_status_html(Path(args.html)))
+    raise NilesError("unknown_command", "Unknown report command.")
+
+
+def dispatch_enrich(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.enrich_command == "ingest":
+        return ok(
+            "enrich ingest",
+            argv,
+            project.ingest_enrichment(args.ref, args.text, source_url=args.source_url, confidence=args.confidence),
+        )
+    raise NilesError("unknown_command", "Unknown enrich command.")
 
 
 def command_name(args: argparse.Namespace) -> str:
     parts = []
     if getattr(args, "command", None):
         parts.append(args.command)
-    for attr in ("agent_command", "contact_command", "note_command", "task_command"):
+    for attr in (
+        "agent_command",
+        "contact_command",
+        "note_command",
+        "task_command",
+        "org_command",
+        "org_context_command",
+        "material_command",
+        "report_command",
+        "enrich_command",
+    ):
         value = getattr(args, attr, None)
         if value:
             parts.append(value)

@@ -8,6 +8,7 @@ import zipfile
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,10 @@ def loads(value: str | None, default: Any) -> Any:
     if value in (None, ""):
         return default
     return json.loads(value)
+
+
+def unique(values: list[str]) -> list[str]:
+    return sorted({value for value in values if value})
 
 
 EXPORT_SCHEMA_VERSION = "niles.export.v1"
@@ -267,6 +272,22 @@ class Project:
               created_at text not null,
               done_note text
             );
+            create table if not exists org_context (
+              id integer primary key check (id = 1),
+              name text,
+              context text,
+              traits text not null,
+              updated_at text not null
+            );
+            create table if not exists materials (
+              id text primary key,
+              title text not null,
+              path text,
+              url text,
+              description text,
+              tags text not null,
+              created_at text not null
+            );
             """
         )
         conn.commit()
@@ -324,6 +345,48 @@ class Project:
                     payload.get("source", "user"),
                 ),
             )
+        elif kind == "contact_updated":
+            contact = self._contact_by_id(conn, payload["id"])
+            merged = {
+                **contact,
+                **{key: value for key, value in payload.get("fields", {}).items() if value is not None},
+            }
+            traits = {**contact.get("traits", {}), **payload.get("traits", {})}
+            tags = set(contact.get("tags", []))
+            tags.update(payload.get("add_tags", []))
+            tags.difference_update(payload.get("remove_tags", []))
+            emails = contact.get("emails", [])
+            emails.extend(payload.get("add_emails", []))
+            phones = contact.get("phones", [])
+            phones.extend(payload.get("add_phones", []))
+            conn.execute(
+                """
+                update contacts
+                   set slug = ?, name = ?, emails = ?, phones = ?, company = ?, role = ?,
+                       traits = ?, tags = ?, cadence_days = ?
+                 where id = ?
+                """,
+                (
+                    merged.get("slug") or slugify(merged["name"]),
+                    merged["name"],
+                    dumps(unique(emails)),
+                    dumps(unique(phones)),
+                    merged.get("company"),
+                    merged.get("role"),
+                    dumps(traits),
+                    dumps(unique(list(tags))),
+                    merged.get("cadence_days"),
+                    payload["id"],
+                ),
+            )
+        elif kind == "contact_archived":
+            conn.execute("update contacts set archived = 1 where id = ?", (payload["id"],))
+        elif kind == "contacts_merged":
+            keep_id = payload["keep_id"]
+            duplicate_id = payload["duplicate_id"]
+            conn.execute("update notes set contact_id = ? where contact_id = ?", (keep_id, duplicate_id))
+            conn.execute("update tasks set contact_id = ? where contact_id = ?", (keep_id, duplicate_id))
+            conn.execute("update contacts set archived = 1 where id = ?", (duplicate_id,))
         elif kind == "task_created":
             conn.execute(
                 """
@@ -348,6 +411,57 @@ class Project:
             conn.execute(
                 "update tasks set status = 'done', done_note = ? where id = ?",
                 (payload.get("note"), payload["id"]),
+            )
+        elif kind == "task_updated":
+            task = self._task_by_id(conn, payload["id"])
+            tags = set(task.get("tags", []))
+            tags.update(payload.get("add_tags", []))
+            tags.difference_update(payload.get("remove_tags", []))
+            fields = payload.get("fields", {})
+            conn.execute(
+                """
+                update tasks
+                   set assignee = ?, due_date = ?, text = ?, status = ?, tags = ?, done_note = ?
+                 where id = ?
+                """,
+                (
+                    fields.get("assignee", task.get("assignee")),
+                    fields.get("due_date", task.get("due_date")),
+                    fields.get("text", task["text"]),
+                    fields.get("status", task["status"]),
+                    dumps(unique(list(tags))),
+                    fields.get("done_note", task.get("done_note")),
+                    payload["id"],
+                ),
+            )
+        elif kind == "org_context_set":
+            conn.execute(
+                """
+                insert or replace into org_context (id, name, context, traits, updated_at)
+                values (1, ?, ?, ?, ?)
+                """,
+                (
+                    payload.get("name"),
+                    payload.get("context"),
+                    dumps(payload.get("traits", {})),
+                    payload["updated_at"],
+                ),
+            )
+        elif kind == "material_added":
+            conn.execute(
+                """
+                insert or replace into materials (id, title, path, url, description, tags, created_at)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["id"],
+                    payload["title"],
+                    payload.get("path"),
+                    payload.get("url"),
+                    payload.get("description"),
+                    dumps(payload.get("tags", [])),
+                    payload["created_at"],
+                ),
             )
         conn.commit()
 
@@ -379,6 +493,67 @@ class Project:
         event = self.append_event("contact_created", payload)
         return {"contact": payload, "events_written": 1, "event_id": event["event_id"]}
 
+    def update_contact(
+        self,
+        ref: str,
+        name: str | None = None,
+        company: str | None = None,
+        role: str | None = None,
+        cadence_days: int | None = None,
+        traits: dict[str, Any] | None = None,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        add_emails: list[str] | None = None,
+        add_phones: list[str] | None = None,
+    ) -> dict[str, Any]:
+        contact = self.resolve_contact(ref)
+        fields: dict[str, Any] = {}
+        if name is not None:
+            fields["name"] = name
+            fields["slug"] = slugify(name)
+        if company is not None:
+            fields["company"] = company
+        if role is not None:
+            fields["role"] = role
+        if cadence_days is not None:
+            fields["cadence_days"] = cadence_days
+        payload = {
+            "id": contact["id"],
+            "fields": fields,
+            "traits": traits or {},
+            "add_tags": unique(add_tags or []),
+            "remove_tags": unique(remove_tags or []),
+            "add_emails": unique(add_emails or []),
+            "add_phones": unique(add_phones or []),
+            "created_at": utc_now(),
+        }
+        event = self.append_event("contact_updated", payload)
+        return {"contact": self.resolve_contact(contact["id"]), "events_written": 1, "event_id": event["event_id"]}
+
+    def archive_contact(self, ref: str, reason: str | None = None) -> dict[str, Any]:
+        contact = self.resolve_contact(ref)
+        event = self.append_event(
+            "contact_archived",
+            {"id": contact["id"], "reason": reason, "created_at": utc_now()},
+        )
+        return {"contact_id": contact["id"], "archived": True, "events_written": 1, "event_id": event["event_id"]}
+
+    def merge_contacts(self, keep_ref: str, duplicate_ref: str, note: str | None = None) -> dict[str, Any]:
+        keep = self.resolve_contact(keep_ref)
+        duplicate = self.resolve_contact(duplicate_ref)
+        if keep["id"] == duplicate["id"]:
+            raise NilesError("same_contact", "Cannot merge a contact into itself.", {"id": keep["id"]})
+        event = self.append_event(
+            "contacts_merged",
+            {"keep_id": keep["id"], "duplicate_id": duplicate["id"], "note": note, "created_at": utc_now()},
+        )
+        return {
+            "kept": self.resolve_contact(keep["id"]),
+            "duplicate_id": duplicate["id"],
+            "events_written": 1,
+            "event_id": event["event_id"],
+        }
+
     def resolve_contact(self, ref: str) -> dict[str, Any]:
         with self.connect() as conn:
             rows = conn.execute("select * from contacts where archived = 0").fetchall()
@@ -403,6 +578,14 @@ class Project:
                 {"ref": ref, "candidates": fuzzy},
             )
         raise NilesError("unknown_contact", f"No contact matched '{ref}'.", {"ref": ref, "candidates": []})
+
+    def get_contact(self, ref: str, with_notes: bool = False, with_tasks: bool = False) -> dict[str, Any]:
+        contact = self.resolve_contact(ref)
+        if with_notes:
+            contact["notes"] = self.list_notes(contact["id"])
+        if with_tasks:
+            contact["tasks"] = self.list_tasks(contact_ref=contact["id"])
+        return contact
 
     def list_contacts(self, tag: str | None = None, stale: bool = False) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -433,6 +616,38 @@ class Project:
         event = self.append_event("note_created", payload)
         return {"contact": contact, "note": payload, "events_written": 1, "event_id": event["event_id"]}
 
+    def ingest_enrichment(
+        self,
+        ref: str,
+        text: str,
+        source_url: str | None = None,
+        confidence: float | None = None,
+    ) -> dict[str, Any]:
+        pieces = [text]
+        if source_url:
+            pieces.append(f"Source: {source_url}")
+        if confidence is not None:
+            pieces.append(f"Confidence: {confidence}")
+        return self.add_note(ref, "\n".join(pieces), "enrichment", None)
+
+    def list_notes(self, ref: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where = ""
+        if ref:
+            contact = self.resolve_contact(ref)
+            where = " where notes.contact_id = ?"
+            params.append(contact["id"])
+        query = (
+            "select notes.*, contacts.name as contact_name from notes "
+            "join contacts on notes.contact_id = contacts.id"
+            f"{where} order by notes.created_at desc"
+        )
+        if limit:
+            query += " limit ?"
+            params.append(limit)
+        with self.connect() as conn:
+            return [self._note_from_row(row) for row in conn.execute(query, params).fetchall()]
+
     def add_task(
         self,
         ref: str | None,
@@ -461,10 +676,15 @@ class Project:
         status: str | None = None,
         assignee: str | None = None,
         due: str | None = None,
+        contact_ref: str | None = None,
     ) -> list[dict[str, Any]]:
         query = "select tasks.*, contacts.name as contact_name from tasks left join contacts on tasks.contact_id = contacts.id"
         clauses: list[str] = []
         params: list[Any] = []
+        if contact_ref:
+            contact = self.resolve_contact(contact_ref)
+            clauses.append("tasks.contact_id = ?")
+            params.append(contact["id"])
         if status:
             clauses.append("tasks.status = ?")
             params.append(status)
@@ -489,17 +709,174 @@ class Project:
         event = self.append_event("task_done", {"id": task_id, "note": note, "created_at": utc_now()})
         return {"task_id": task_id, "status": "done", "events_written": 1, "event_id": event["event_id"]}
 
+    def update_task(
+        self,
+        task_id: str,
+        text: str | None = None,
+        due_date: str | None = None,
+        assignee: str | None = None,
+        status: str | None = None,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            self._task_by_id(conn, task_id)
+        fields = {
+            key: value
+            for key, value in {
+                "text": text,
+                "due_date": due_date,
+                "assignee": assignee,
+                "status": status,
+                "done_note": note,
+            }.items()
+            if value is not None
+        }
+        event = self.append_event(
+            "task_updated",
+            {
+                "id": task_id,
+                "fields": fields,
+                "add_tags": unique(add_tags or []),
+                "remove_tags": unique(remove_tags or []),
+                "created_at": utc_now(),
+            },
+        )
+        with self.connect() as conn:
+            task = self._task_by_id(conn, task_id)
+        return {"task": task, "events_written": 1, "event_id": event["event_id"]}
+
+    def suggest_tasks(self, assignee: str | None = None) -> list[dict[str, Any]]:
+        suggestions: list[dict[str, Any]] = []
+        contacts = self.list_contacts()
+        open_tasks = self.list_tasks(status="open")
+        contacts_with_open_tasks = {task["contact_id"] for task in open_tasks if task.get("contact_id")}
+        for contact in contacts:
+            if contact["id"] in contacts_with_open_tasks:
+                continue
+            notes = self.list_notes(contact["id"], limit=3)
+            text = "Follow up"
+            for note in notes:
+                lowered = note["text"].lower()
+                if any(marker in lowered for marker in ("next step", "todo", "follow up", "reach out", "waiting")):
+                    text = note["text"].splitlines()[0][:160]
+                    break
+            if notes or contact.get("cadence_days"):
+                suggestions.append(
+                    {
+                        "contact_id": contact["id"],
+                        "contact": contact["name"],
+                        "contact_ref": contact["slug"],
+                        "suggested_task": text,
+                        "assignee": assignee,
+                        "reason": "Contact has recent notes or cadence but no open task.",
+                        "create_command": " ".join(
+                            part
+                            for part in [
+                                f'niles task add {contact["slug"]} "{text}"',
+                                f"--assign {assignee}" if assignee else "",
+                            ]
+                            if part
+                        ),
+                    }
+                )
+        return suggestions
+
+    def set_org_context(self, name: str | None, context: str | None, traits: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_org_context()
+        payload = {
+            "name": name if name is not None else current.get("name"),
+            "context": context if context is not None else current.get("context"),
+            "traits": {**current.get("traits", {}), **traits},
+            "updated_at": utc_now(),
+        }
+        event = self.append_event("org_context_set", payload)
+        return {"org": self.get_org_context(), "events_written": 1, "event_id": event["event_id"]}
+
+    def get_org_context(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("select * from org_context where id = 1").fetchone()
+        if row is None:
+            return {"name": None, "context": None, "traits": {}, "updated_at": None}
+        return {
+            "name": row["name"],
+            "context": row["context"],
+            "traits": loads(row["traits"], {}),
+            "updated_at": row["updated_at"],
+        }
+
+    def add_material(
+        self,
+        title: str,
+        path: str | None = None,
+        url: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if not path and not url:
+            raise NilesError("missing_material_location", "Material needs --path or --url.")
+        payload = {
+            "id": new_id("mat"),
+            "title": title,
+            "path": path,
+            "url": url,
+            "description": description,
+            "tags": unique(tags or []),
+            "created_at": utc_now(),
+        }
+        event = self.append_event("material_added", payload)
+        return {"material": payload, "events_written": 1, "event_id": event["event_id"]}
+
+    def list_materials(self, tag: str | None = None) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("select * from materials order by title").fetchall()
+        materials = [self._material_from_row(row) for row in rows]
+        if tag:
+            materials = [material for material in materials if tag in material["tags"]]
+        return materials
+
+    def render_status_html(self, output: Path) -> dict[str, Any]:
+        out = output.expanduser()
+        if not out.is_absolute():
+            out = self.root / out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        contacts = self.list_contacts()
+        notes = self.list_notes(limit=50)
+        tasks = self.list_tasks(status="open")
+        org = self.get_org_context()
+        html = build_status_html(self.root.name, self.counts(), org, contacts, notes, tasks)
+        out.write_text(html, encoding="utf-8")
+        return {"path": str(out), "counts": self.counts()}
+
     def counts(self) -> dict[str, Any]:
         with self.connect() as conn:
             return {
                 "contacts": conn.execute("select count(*) from contacts").fetchone()[0],
                 "active_contacts": conn.execute("select count(*) from contacts where archived = 0").fetchone()[0],
+                "archived_contacts": conn.execute("select count(*) from contacts where archived = 1").fetchone()[0],
                 "notes": conn.execute("select count(*) from notes").fetchone()[0],
                 "open_tasks": conn.execute("select count(*) from tasks where status = 'open'").fetchone()[0],
                 "done_tasks": conn.execute("select count(*) from tasks where status = 'done'").fetchone()[0],
+                "materials": conn.execute("select count(*) from materials").fetchone()[0],
                 "pending_intake": 0,
                 "pending_status_updates": 0,
             }
+
+    def _contact_by_id(self, conn: sqlite3.Connection, contact_id: str) -> dict[str, Any]:
+        row = conn.execute("select * from contacts where id = ?", (contact_id,)).fetchone()
+        if row is None:
+            raise NilesError("unknown_contact", f"No contact matched '{contact_id}'.", {"ref": contact_id})
+        return self._contact_from_row(row)
+
+    def _task_by_id(self, conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
+        row = conn.execute(
+            "select tasks.*, contacts.name as contact_name from tasks left join contacts on tasks.contact_id = contacts.id where tasks.id = ?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            raise NilesError("unknown_task", f"No task matched '{task_id}'.", {"id": task_id})
+        return self._task_from_row(row)
 
     def _contact_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -517,6 +894,17 @@ class Project:
             "created_at": row["created_at"],
         }
 
+    def _note_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "contact_id": row["contact_id"],
+            "contact": row["contact_name"],
+            "created_at": row["created_at"],
+            "kind": row["kind"],
+            "text": row["text"],
+            "source": row["source"],
+        }
+
     def _task_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"],
@@ -532,6 +920,17 @@ class Project:
             "done_note": row["done_note"],
         }
 
+    def _material_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "path": row["path"],
+            "url": row["url"],
+            "description": row["description"],
+            "tags": loads(row["tags"], []),
+            "created_at": row["created_at"],
+        }
+
 
 def validate_archive_member(name: str) -> None:
     path = Path(name)
@@ -541,3 +940,86 @@ def validate_archive_member(name: str) -> None:
         raise NilesError("invalid_archive", f"Unexpected archive path: {name}", {"member": name})
     if name.startswith(".niles/index/"):
         raise NilesError("invalid_archive", "Archive must not contain derived index files.", {"member": name})
+
+
+def build_status_html(
+    project_name: str,
+    counts: dict[str, Any],
+    org: dict[str, Any],
+    contacts: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+) -> str:
+    contact_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(contact['name'])}</td>"
+        f"<td>{escape(', '.join(contact['tags']))}</td>"
+        f"<td>{escape(str(contact.get('traits', {}).get('priority', '')))}</td>"
+        f"<td>{escape(contact.get('last_touched') or '')}</td>"
+        "</tr>"
+        for contact in contacts
+    )
+    task_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(task.get('due_date') or '')}</td>"
+        f"<td>{escape(task.get('assignee') or '')}</td>"
+        f"<td>{escape(task.get('contact') or '')}</td>"
+        f"<td>{escape(task['text'])}</td>"
+        "</tr>"
+        for task in tasks
+    )
+    note_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(note['created_at'])}</td>"
+        f"<td>{escape(note['contact'])}</td>"
+        f"<td>{escape(note['kind'])}</td>"
+        f"<td>{escape(note['text'])}</td>"
+        "</tr>"
+        for note in notes
+    )
+    org_context = escape(org.get("context") or "No org context set.")
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Niles Status - {escape(project_name)}</title>
+    <style>
+      body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; background: #fff; }}
+      header {{ padding: 32px 40px; border-bottom: 1px solid #d4d8de; }}
+      main {{ max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }}
+      h1 {{ margin: 0 0 8px; font-size: 44px; }}
+      h2 {{ margin: 30px 0 10px; font-size: 24px; }}
+      p {{ color: #626b75; max-width: 780px; }}
+      .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 20px; }}
+      .stat {{ border: 1px solid #d4d8de; border-radius: 8px; padding: 14px; background: #f6f8fa; }}
+      .value {{ display: block; font-size: 28px; font-weight: 700; }}
+      table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+      th, td {{ border-bottom: 1px solid #d4d8de; padding: 9px 8px; text-align: left; vertical-align: top; }}
+      th {{ background: #f6f8fa; font-size: 13px; }}
+      td {{ font-size: 14px; }}
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{escape(project_name)} CRM Status</h1>
+      <p>{org_context}</p>
+      <div class="stats">
+        <div class="stat"><span class="value">{counts['active_contacts']}</span>active contacts</div>
+        <div class="stat"><span class="value">{counts['archived_contacts']}</span>archived contacts</div>
+        <div class="stat"><span class="value">{counts['notes']}</span>notes</div>
+        <div class="stat"><span class="value">{counts['open_tasks']}</span>open tasks</div>
+        <div class="stat"><span class="value">{counts['materials']}</span>materials</div>
+      </div>
+    </header>
+    <main>
+      <h2>Open Tasks</h2>
+      <table><thead><tr><th>Due</th><th>Assignee</th><th>Contact</th><th>Task</th></tr></thead><tbody>{task_rows}</tbody></table>
+      <h2>Contacts</h2>
+      <table><thead><tr><th>Name</th><th>Tags</th><th>Priority</th><th>Last touched</th></tr></thead><tbody>{contact_rows}</tbody></table>
+      <h2>Recent Notes</h2>
+      <table><thead><tr><th>Created</th><th>Contact</th><th>Kind</th><th>Text</th></tr></thead><tbody>{note_rows}</tbody></table>
+    </main>
+  </body>
+</html>
+"""

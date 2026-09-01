@@ -109,6 +109,100 @@ def test_contact_note_task_flow(tmp_path):
     assert payload["data"]["status"] == "done"
 
 
+def test_notes_contact_updates_tasks_and_report(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Construct Connect", "--tag", "prospect")[0] == 0
+    assert run_niles(tmp_path, "note", "add", "construct-connect", "Waiting on demo follow-up", "--kind", "call")[0] == 0
+
+    code, payload = run_niles(tmp_path, "note", "list", "construct-connect")
+    assert code == 0
+    assert payload["data"]["notes"][0]["text"] == "Waiting on demo follow-up"
+
+    code, payload = run_niles(tmp_path, "contact", "show", "construct-connect", "--with-notes")
+    assert code == 0
+    assert payload["data"]["contact"]["notes"][0]["kind"] == "call"
+
+    code, payload = run_niles(tmp_path, "contact", "tag", "construct-connect", "--add", "dead", "--remove", "prospect")
+    assert code == 0
+    assert "dead" in payload["data"]["contact"]["tags"]
+    assert "prospect" not in payload["data"]["contact"]["tags"]
+
+    code, payload = run_niles(tmp_path, "contact", "archive", "construct-connect", "--reason", "No active path")
+    assert code == 0
+    assert payload["data"]["archived"] is True
+
+    assert run_niles(tmp_path, "contact", "add", "Workday", "--tag", "prospect")[0] == 0
+    assert run_niles(tmp_path, "task", "add", "workday", "Reach out to Athena", "--assign", "john")[0] == 0
+    code, payload = run_niles(tmp_path, "task", "list", "--assignee", "john")
+    task_id = payload["data"]["tasks"][0]["id"]
+
+    code, payload = run_niles(tmp_path, "task", "reassign", task_id, "robin")
+    assert code == 0
+    assert payload["data"]["task"]["assignee"] == "robin"
+
+    code, payload = run_niles(tmp_path, "task", "cancel", task_id, "--note", "Waiting on them")
+    assert code == 0
+    assert payload["data"]["task"]["status"] == "cancelled"
+    assert payload["data"]["task"]["done_note"] == "Waiting on them"
+
+    report = tmp_path / "status.html"
+    code, payload = run_niles(tmp_path, "report", "status", "--html", str(report))
+    assert code == 0
+    assert report.is_file()
+    assert "Workday" in report.read_text(encoding="utf-8")
+
+
+def test_org_material_enrichment_and_merge(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Salesforce", "--tag", "target")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Salesforce Inc", "--tag", "prospect")[0] == 0
+
+    code, payload = run_niles(
+        tmp_path,
+        "org",
+        "context",
+        "set",
+        "Expected Parrot sells EDSL-backed research workflows.",
+        "--name",
+        "Expected Parrot",
+        "--trait",
+        "market=research",
+    )
+    assert code == 0
+    assert payload["data"]["org"]["name"] == "Expected Parrot"
+
+    code, payload = run_niles(
+        tmp_path,
+        "material",
+        "add",
+        "GTM deck",
+        "--url",
+        "https://example.com/deck",
+        "--tag",
+        "sales",
+    )
+    assert code == 0
+    assert payload["data"]["material"]["title"] == "GTM deck"
+
+    code, payload = run_niles(
+        tmp_path,
+        "enrich",
+        "ingest",
+        "salesforce",
+        "Agent found a relevant enterprise AI angle.",
+        "--source-url",
+        "https://example.com/source",
+        "--confidence",
+        "0.8",
+    )
+    assert code == 0
+    assert payload["data"]["note"]["kind"] == "enrichment"
+
+    code, payload = run_niles(tmp_path, "contact", "merge", "salesforce", "salesforce-inc", "--note", "Duplicate")
+    assert code == 0
+    assert payload["data"]["duplicate_id"].startswith("con_")
+
+
 def test_export_import_round_trip(tmp_path):
     source = tmp_path / "source"
     target = tmp_path / "target"

@@ -170,19 +170,32 @@ niles guide | niles next | niles capabilities
 
 niles contact add "Jane Doe" --email jane@acme.com --company Acme --tag prospect
 niles contact show <ref>                    # ref = id | email | fuzzy name
+niles contact show <ref> --with-notes [--with-tasks]
 niles contact list [--tag t] [--stale] [--json is the default; --human for tables]
 niles contact edit <ref> --set role="CTO" --trait timezone=ET
+niles contact update <ref> [--name n] [--company c] [--role r] [--trait k=v]
+niles contact tag <ref> [--add tag] [--remove tag]
 niles contact merge <ref-keep> <ref-dup>
 niles contact archive <ref> | niles contact delete <ref> --hard
 
 niles note add <ref> "Called re renewal" [--kind call] [--debrief]
+niles note list [<ref>] [--limit n]
 niles task add [<ref>] "Send proposal" --due 2026-09-05 [--assign john]
 niles task list [--due this-week] [--assignee robin] [--status open]
 niles task done <id> [--note "Sent proposal"]
+niles task update <id> [--text t] [--due d] [--assign a] [--status open|done|blocked|cancelled]
+niles task reassign <id> <assignee>
+niles task cancel <id> [--note text]
+niles task suggest [--assignee john]
 
 niles org set --name "Expected Parrot" --context <text>
+niles org context set <text> [--name "Expected Parrot"] [--trait k=v]
+niles org context show
 niles teammate add "John Horton" --alias john --alias JJH
 niles teammate list | niles teammate show <ref>
+niles material add "Deck" [--path p | --url u] [--tag sales]
+niles material list [--tag sales]
+niles enrich ingest <ref> <text> [--source-url u] [--confidence x]
 
 niles search <terms>                        # FTS over names, notes, traits
 niles import csv <path> [--mapping m.toml]  # column→field mapping, dry-run default
@@ -204,6 +217,7 @@ niles status-request pull [<form-id>]       # fetch updates → pending queue
 niles status-request review                 # accept / edit / reject learned updates
 
 niles report pipeline | activity | neglect | tasks
+niles report status --html status.html
 
 niles history [--contact <ref>] | niles undo <event-id>
 niles fsck | niles rebuild-index

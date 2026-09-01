@@ -37,6 +37,7 @@ How Niles works:
 - SQLite under .niles/index/ is a rebuildable projection for listing, lookup, and reporting.
 - Every command emits one JSON envelope to stdout with status, data, errors, warnings, and next_steps.
 - Portable setup uses niles export/import zip archives; archives include durable .niles state and rebuild the SQLite index after import.
+- Agents must not read .niles/index/niles.sqlite directly; use Niles commands for notes, tasks, reports, and exports.
 - EDSL/EP work is explicit: niles exports .ep jobs or humanize requests, ep runs them, and niles imports reviewed results.
 
 When to use Niles:
@@ -53,7 +54,8 @@ Project boundary:
 - Run niles commands from the CRM project directory, not from the niles source checkout unless you are developing niles itself.
 - Durable CRM state lives under .niles/.
 - Do not edit .niles/events/ manually. Use niles commands so the event log and SQLite projection stay consistent.
-- Treat .niles/index/niles.sqlite as rebuildable derived state.
+- Treat .niles/index/niles.sqlite as rebuildable derived state, not an agent API.
+- Do not query .niles/index/niles.sqlite directly. If a needed view is missing, ask for a Niles command to be added rather than reaching into the database.
 
 Command contract:
 - Prefer niles CLI commands over direct file edits.
@@ -70,24 +72,37 @@ Core CRM commands:
 4. Add a company/contact: niles contact add "Acme Data" --tag prospect --trait source=warm_intro --trait priority=1 --cadence-days 14
 5. Add a person/contact: niles contact add "Maya Chen" --company "Acme Data" --role "VP Data" --email maya@acmedata.example --tag buyer
 6. Show a contact: niles contact show <id-or-slug>
-7. List contacts: niles contact list --tag prospect
-8. Add a note: niles note add <contact-ref> "Robin introduced us. Maya wants a short technical proof before budget review." --kind call
-9. Add a task: niles task add <contact-ref> "Send proof outline and two relevant customer examples" --due YYYY-MM-DD --assign john --tag next-step
-10. List tasks: niles task list --status open --assignee john
-11. Complete a task: niles task done <task-id> --note "What happened"
-12. Export a CRM for another context: niles export niles-crm.zip
-13. Import a CRM in a fresh directory: niles import /path/to/niles-crm.zip
-14. Replace an existing local CRM only when the user explicitly asks: niles import /path/to/niles-crm.zip --replace
+7. Show notes inline: niles contact show <id-or-slug> --with-notes
+8. List contacts: niles contact list --tag prospect
+9. Update tags: niles contact tag <contact-ref> --add dead --remove prospect
+10. Archive a contact: niles contact archive <contact-ref> --reason "No active path"
+11. Merge duplicates: niles contact merge <keep-ref> <duplicate-ref> --note "Duplicate"
+12. Add a note: niles note add <contact-ref> "Robin introduced us. Maya wants a short technical proof before budget review." --kind call
+13. List notes: niles note list <contact-ref> --limit 10
+14. Add a task: niles task add <contact-ref> "Send proof outline and two relevant customer examples" --due YYYY-MM-DD --assign john --tag next-step
+15. List tasks: niles task list --status open --assignee john
+16. Reassign a task: niles task reassign <task-id> robin
+17. Cancel a task: niles task cancel <task-id> --note "Waiting on them"
+18. Suggest missing tasks: niles task suggest --assignee john
+19. Save company context: niles org context set "What our company does" --name "Expected Parrot"
+20. Add shareable material: niles material add "GTM deck" --url https://example.com/deck --tag sales
+21. Ingest researched enrichment after the agent does the research: niles enrich ingest <contact-ref> "Researched claim or profile note" --source-url https://example.com/source --confidence 0.8
+22. Generate an HTML status report: niles report status --html status.html
+23. Export a CRM for another context: niles export niles-crm.zip
+24. Import a CRM in a fresh directory: niles import /path/to/niles-crm.zip
+25. Replace an existing local CRM only when the user explicitly asks: niles import /path/to/niles-crm.zip --replace
 
 EDSL job workflow:
 - Niles should export .ep jobs for model/human work.
 - Run exported jobs with ep.
 - Import audited results back into Niles.
 - Do not invent CRM mutations from model output until a niles import/review/accept command records them.
+- For enrichment, the agent does the searching outside Niles, then records reviewed findings with niles enrich ingest.
 
 Common pitfalls:
 - Do not treat the source checkout as the CRM project unless the user explicitly wants that.
 - Do not edit .niles/events/ directly.
+- Do not inspect or query .niles/index/niles.sqlite directly.
 - Do not assume a fuzzy contact reference is safe when multiple contacts may match.
 - Do not store secrets in CRM state.
 - Do not use niles import --replace unless the user explicitly wants to overwrite the destination .niles state.
