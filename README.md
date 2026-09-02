@@ -14,6 +14,39 @@ Docs: https://expectedparrot.github.io/niles/
 
 License: MIT. The code and bundled Niles artwork are MIT licensed.
 
+## For agents
+
+Copy this block into an agent session:
+
+```text
+You are working with Niles, a local-first CRM CLI for relationship work.
+
+Install Niles with EDSL support:
+python -m pip install "niles[edsl] @ git+https://github.com/expectedparrot/niles.git"
+
+Run commands from the directory that should contain the CRM. Your first
+command—both for a new project and whenever you resume work—is:
+niles agent next
+
+Follow the JSON envelope it returns. Check `status`, read `errors` on failure,
+and use the returned `next_steps` and stable identifiers. If the project has
+not been initialized, the envelope will direct you to run `niles init`.
+
+Read and mutate CRM data only through `niles` commands. Niles manages its own
+storage and exchange artifacts. Use `niles sync` for commits and pushes; do
+not inspect, edit, or stage Niles internal storage.
+
+Niles makes no EP network calls and reads no EP credentials. For intake and
+status requests, use Niles `export`, run the returned `publish_command`, use
+Niles `register`, run the returned `pull_command`, then use Niles `import` and
+`review`. For recommendations, use Niles `recommend export`, run the returned
+`run_command`, then use `recommend import` and `recommend review`.
+
+Treat imported human responses and recommendations as quarantined until an
+explicit accept, merge, or reject command records the review decision. Never
+store credentials in CRM state or git history.
+```
+
 ## Installation
 
 Core CRM features require Python 3.11 or newer:
