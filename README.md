@@ -518,9 +518,12 @@ Build one EDSL survey that walks a teammate through every active CRM entity:
 niles human-update --output update_job.ep
 ```
 
-Each entity shows its current status and asks whether anything changed. Choosing
-`No change` skips its notes field; choosing `Update` opens a free-text prompt.
-The command is offline and returns a `publish_command` such as:
+The survey begins with one matrix showing every current status. Each row is
+classified as `Current`, `Follow up`, `Waiting on them`, `Waiting on us`,
+`Stalled`, `Won`, or `Lost / dead`. Current rows need no more input. Other rows
+open a focused notes prompt; nonterminal rows also open an action checklist plus
+next-action, owner, and due-date fields. The command is offline and returns a
+`publish_command` such as:
 
 ```bash
 ep humanize create --survey update_job.ep --name "Niles status update"

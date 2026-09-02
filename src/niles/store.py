@@ -1666,7 +1666,7 @@ class Project:
     def export_human_update(self, output: Path) -> dict[str, Any]:
         """Build an offline EDSL survey that asks for updates on every entity."""
         try:
-            from edsl import QuestionFreeText, QuestionMultipleChoice, Survey
+            from edsl import QuestionCheckBox, QuestionFreeText, QuestionMatrix, Survey
         except ImportError as exc:
             raise NilesError(
                 "edsl_not_installed",
@@ -1677,33 +1677,67 @@ class Project:
         if not contacts:
             raise NilesError("no_entities", "Add at least one contact or organization before exporting a human update.")
 
-        questions = []
-        routing: dict[str, dict[str, str]] = {}
+        row_labels: dict[str, str] = {}
+        status_lines = []
         for contact in contacts:
             notes = self.list_notes(contact["id"], limit=1)
             status = str(contact.get("traits", {}).get("current_status") or (notes[0]["text"] if notes else "No status recorded"))
+            row_label = contact["name"]
+            if row_label in row_labels:
+                row_label = f"{row_label} ({contact['id'][-6:]})"
+            row_labels[row_label] = contact["id"]
+            status_lines.append(f"- **{contact['name']}** — {status}")
+
+        triage = QuestionMatrix(
+            question_name="entity_disposition",
+            question_text=(
+                "Choose the current disposition for every relationship.\n\n"
+                "Current CRM status:\n" + "\n".join(status_lines)
+            ),
+            question_items=list(row_labels),
+            question_options=["Current", "Follow up", "Waiting on them", "Waiting on us", "Stalled", "Won", "Lost / dead"],
+            include_comment=False,
+        )
+        questions = [triage]
+        routing: dict[str, dict[str, str]] = {}
+        labels_by_id = {contact_id: label for label, contact_id in row_labels.items()}
+        for contact in contacts:
             prefix = contact["id"].replace("-", "_")
-            changed_name = f"changed_{prefix}"
+            actions_name = f"actions_{prefix}"
             notes_name = f"notes_{prefix}"
-            changed = QuestionMultipleChoice(
-                question_name=changed_name,
-                question_text=f"{contact['name']}\n\nCurrent status: {status}\n\nHas anything changed?",
-                question_options=["No change", "Update"],
+            next_name = f"next_action_{prefix}"
+            owner_name = f"owner_{prefix}"
+            due_name = f"due_{prefix}"
+            actions = QuestionCheckBox(
+                question_name=actions_name,
+                question_text=f"What should we do for {contact['name']}? Select all that apply.",
+                question_options=["Send follow-up", "Schedule meeting or demo", "Make introduction", "Prepare materials or proposal", "Review contract", "Other"],
+                min_selections=1,
+                include_comment=False,
             )
-            update = QuestionFreeText(
+            update_notes = QuestionFreeText(
                 question_name=notes_name,
-                question_text=f"What changed for {contact['name']}? Add the status update or notes.",
+                question_text=f"What changed for {contact['name']}? Add context or status notes.",
             )
-            questions.extend([changed, update])
+            next_action = QuestionFreeText(question_name=next_name, question_text=f"What is the specific next action for {contact['name']}?")
+            owner = QuestionFreeText(question_name=owner_name, question_text=f"Who owns the next action for {contact['name']}?")
+            due = QuestionFreeText(question_name=due_name, question_text=f"When is the next action for {contact['name']} due?")
+            questions.extend([actions, update_notes, next_action, owner, due])
+            routing[actions_name] = {"contact_id": contact["id"], "contact_name": contact["name"], "action": "suggest_actions"}
             routing[notes_name] = {"contact_id": contact["id"], "contact_name": contact["name"], "action": "append_note"}
+            routing[next_name] = {"contact_id": contact["id"], "contact_name": contact["name"], "action": "create_task"}
+            routing[owner_name] = {"contact_id": contact["id"], "contact_name": contact["name"], "action": "task_assignee", "binds": next_name}
+            routing[due_name] = {"contact_id": contact["id"], "contact_name": contact["name"], "action": "task_due", "binds": next_name}
 
         survey = Survey(questions=questions, name="niles-human-update")
         for contact in contacts:
             prefix = contact["id"].replace("-", "_")
-            survey = survey.add_skip_rule(
-                f"notes_{prefix}",
-                f"{{{{ changed_{prefix}.answer }}}} == 'No change'",
-            )
+            row_label = labels_by_id[contact["id"]]
+            current = f"{{{{ entity_disposition.answer }}}}[{row_label!r}] == 'Current'"
+            terminal = f"{{{{ entity_disposition.answer }}}}[{row_label!r}] in ['Current', 'Won', 'Lost / dead']"
+            for field in (f"actions_{prefix}", f"next_action_{prefix}", f"owner_{prefix}", f"due_{prefix}"):
+                survey = survey.add_skip_rule(field, terminal)
+            survey = survey.add_skip_rule(f"notes_{prefix}", current)
 
         path = output if output.is_absolute() else self.root / output
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1713,6 +1747,8 @@ class Project:
             "schema_version": "niles.human-update.v1",
             "survey_path": str(path),
             "entities": len(contacts),
+            "disposition_question": "entity_disposition",
+            "disposition_rows": row_labels,
             "routing": routing,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

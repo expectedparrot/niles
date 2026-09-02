@@ -910,20 +910,32 @@ def test_human_update_exports_all_entities_with_current_status_and_skip_logic(tm
     assert code == 0
     data = payload["data"]
     assert data["entities"] == 2
-    assert data["question_count"] == 4
+    assert data["question_count"] == 11
     assert data["network"] is False
     assert data["publish_command"].startswith("ep humanize create --survey")
     assert output.is_file()
     manifest = json.loads(Path(data["manifest_path"]).read_text(encoding="utf-8"))
     assert {route["contact_id"] for route in manifest["routing"].values()} == {first["id"], second["id"]}
+    assert set(manifest["disposition_rows"].values()) == {first["id"], second["id"]}
 
     from edsl import Survey
+    from edsl.surveys import EndOfSurvey
 
     survey = Survey.load(str(output))
+    assert survey.questions[0].question_type == "matrix"
+    assert survey.questions[0].question_options == ["Current", "Follow up", "Waiting on them", "Waiting on us", "Stalled", "Won", "Lost / dead"]
     texts = [question.question_text for question in survey.questions]
     assert any("Burns Industries" in text and "Contract is with Mr. Burns" in text for text in texts)
     assert any("Waylon Smithers" in text and "Waiting for a callback" in text for text in texts)
     assert len(survey.rule_collection.to_dict()["rules"]) > len(survey.questions)
+    rows = manifest["disposition_rows"]
+    current_answers = {label: "Current" for label in rows}
+    assert survey.next_question("entity_disposition", {"entity_disposition.answer": current_answers}) == EndOfSurvey
+    second_label = next(label for label, contact_id in rows.items() if contact_id == second["id"])
+    second_follow_up = {**current_answers, second_label: "Follow up"}
+    assert survey.next_question("entity_disposition", {"entity_disposition.answer": second_follow_up}).question_name == f"actions_{second['id'].replace('-', '_')}"
+    follow_up_answers = {**current_answers, next(label for label, contact_id in rows.items() if contact_id == first["id"]): "Follow up"}
+    assert survey.next_question("entity_disposition", {"entity_disposition.answer": follow_up_answers}).question_name == f"actions_{first['id'].replace('-', '_')}"
 
 
 def test_human_update_requires_entities(tmp_path):
