@@ -7,16 +7,14 @@
   <title>Niles — a local-first CRM for agents</title>
   <style>
     :root{--green:#3f7d55;--dark:#21452e;--light:#edf6ef;--ink:#172019;--muted:#626d65;--paper:#f4f6f3;--panel:#fff;--rule:#dce4dd;--code:#17221b;--amber:#b86d18;--red:#a64235;--sidebar:278px;--measure:790px;--serif:Georgia,"Times New Roman",serif;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
-    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--paper);font:16px/1.7 var(--sans)}
-    #progress{position:fixed;inset:0 auto auto 0;z-index:20;width:0;height:3px;background:#8fca9f}
-    nav{position:fixed;inset:0 auto 0 0;z-index:10;width:var(--sidebar);padding:27px 22px;overflow-y:auto;color:#e9f4ec;background:var(--dark)}
-    .brand{display:block;margin:0 8px 22px;color:#fff;text-decoration:none}.brand strong{display:block;font:600 24px var(--serif)}.brand small{display:block;color:#a9c8b2;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
-    nav .book{margin:0 8px 22px;font:600 19px/1.3 var(--serif)}nav .part{margin:18px 8px 5px;color:#9fd3ad;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}nav>a:not(.brand){display:block;padding:5px 8px;color:#d4e7d9;text-decoration:none;border-radius:6px;font-size:13px}nav>a:not(.brand):hover,nav>a.active{color:#fff;background:#306441}.nav-note{margin:26px 8px 0;color:#b7cec0;font-size:11px;line-height:1.5}.nav-toggle{display:none;width:100%;padding:10px 12px;color:#fff;background:#306441;border:1px solid #74a883;border-radius:7px;font-weight:700;text-align:left;cursor:pointer}.nav-toggle:after{float:right;content:"+"}.open .nav-toggle:after{content:"−"}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--paper);font:16px/1.7 var(--sans)}#progress{position:fixed;inset:0 auto auto 0;z-index:20;width:0;height:3px;background:#8fca9f}
+    nav{position:fixed;inset:0 auto 0 0;z-index:10;width:var(--sidebar);padding:27px 22px;overflow-y:auto;color:#e9f4ec;background:var(--dark)}.brand{display:block;margin:0 8px 22px;color:#fff;text-decoration:none}.brand strong{display:block;font:600 24px var(--serif)}.brand small{display:block;color:#a9c8b2;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}nav .book{margin:0 8px 22px;font:600 19px/1.3 var(--serif)}nav .part{margin:18px 8px 5px;color:#9fd3ad;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}nav>a:not(.brand){display:block;padding:5px 8px;color:#d4e7d9;text-decoration:none;border-radius:6px;font-size:13px}nav>a:not(.brand):hover,nav>a.active{color:#fff;background:#306441}.nav-note{margin:26px 8px 0;color:#b7cec0;font-size:11px;line-height:1.5}.nav-toggle{display:none;width:100%;padding:10px 12px;color:#fff;background:#306441;border:1px solid #74a883;border-radius:7px;font-weight:700;text-align:left;cursor:pointer}.nav-toggle:after{float:right;content:"+"}.open .nav-toggle:after{content:"−"}
     main{margin-left:var(--sidebar)}article{max-width:940px;margin:auto;padding:48px 55px 110px;background:var(--panel);box-shadow:0 0 0 1px rgba(0,0,0,.025)}header{padding:52px 0 48px;border-bottom:3px solid var(--green);overflow:hidden}.eyebrow{color:var(--green);font-size:12px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}h1,h2,h3,h4{font-family:var(--serif);font-weight:600;line-height:1.25}h1{max-width:700px;margin:13px 0 18px;font-size:clamp(43px,7vw,68px);letter-spacing:-.03em}.dek{max-width:700px;color:var(--muted);font-size:21px;line-height:1.5}.meta{display:flex;flex-wrap:wrap;gap:9px 22px;margin-top:25px;color:var(--muted);font-size:13px}.hero-art{float:right;width:250px;max-height:210px;margin:-38px 0 8px 25px;object-fit:contain;filter:saturate(.85)}
-    section{scroll-margin-top:20px}h2{margin:76px 0 22px;padding:12px 0 8px;color:var(--green);font-size:32px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}h3{margin:38px 0 12px;font-size:23px}h4{margin:24px 0 7px;font-size:18px}.chapter{font-size:.55em;vertical-align:.35em}p,ul,ol,table,pre,.callout,.grid,.flow,.boundary{max-width:var(--measure)}a{color:var(--green)}code{padding:.14em .34em;background:#eef2ee;border-radius:4px;font:88% var(--mono)}pre{position:relative;overflow:auto;margin:18px 0 25px;padding:20px 58px 20px 22px;color:#dce8df;background:var(--code);border-left:4px solid var(--green);border-radius:8px;font:13px/1.58 var(--mono)}pre code{padding:0;color:inherit;background:none;font:inherit}.copy{position:absolute;top:10px;right:10px;padding:5px 8px;color:#d8ebe0;background:#34483a;border:0;border-radius:5px;font:11px var(--sans);cursor:pointer}.copy:hover{color:#fff;background:var(--green)}
-    .callout{margin:24px 0;padding:17px 21px;background:linear-gradient(135deg,#fafcfb,var(--light));border-left:4px solid var(--green);border-radius:0 8px 8px 0}.callout.warn{background:#fff7e9;border-color:var(--amber)}.callout.stop{background:#fff1ef;border-color:var(--red)}.callout p{margin:.35rem 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{padding:18px;background:#fff;border:1px solid var(--rule);border-radius:8px;box-shadow:0 2px 7px rgba(0,0,0,.035)}.card h3,.card h4{margin-top:0;color:var(--dark)}.card p{margin-bottom:0}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:24px 0}.step{position:relative;padding:14px 8px;text-align:center;background:var(--light);border:1px solid #afd0b8;border-radius:7px;font-size:12px;font-weight:700}.step:not(:last-child):after{position:absolute;top:50%;right:-8px;z-index:2;color:var(--green);content:"›";font-size:22px;transform:translateY(-53%)}
-    table{width:100%;margin:20px 0 28px;border-collapse:collapse;font-size:14px}th,td{padding:11px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule)}th{color:#fff;background:var(--green)}tbody tr:nth-child(even){background:#f7f9f7}.output{margin:-8px 0 27px}.output summary{color:var(--green);font-size:13px;font-weight:700;cursor:pointer}.output[open] summary{margin-bottom:8px}.output pre{margin:0;max-height:430px;white-space:pre-wrap}.boundary{display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch;gap:12px;margin:23px 0}.boundary>div{padding:18px;border:1px solid var(--rule);border-radius:8px}.boundary .arrow{align-self:center;padding:0;border:0;color:var(--green);font-size:27px}.boundary h4{margin-top:0}.boundary ul{margin-bottom:0;padding-left:19px}.pill{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;color:var(--dark);background:var(--light);border:1px solid #bfd5c5;border-radius:999px;font-size:12px;font-weight:700}footer{margin-top:80px;padding-top:27px;color:var(--muted);border-top:3px solid var(--green);font-size:13px}
-    @media(max-width:960px){nav{position:static;width:auto;padding-bottom:20px}.nav-toggle{display:block}nav .part,nav>a:not(.brand),nav .nav-note{display:none}nav.open .part{display:block}nav.open>a:not(.brand){display:inline-block}nav.open .nav-note{display:block}nav .book{margin-bottom:13px}main{margin-left:0}article{padding:28px 24px 80px}.brand{max-width:280px}}@media(max-width:650px){.hero-art{float:none;width:190px;margin:0 0 15px}.grid,.flow,.boundary{grid-template-columns:1fr}.step:not(:last-child):after,.boundary .arrow{display:none}h2{font-size:28px}table{display:block;overflow-x:auto}pre{padding-right:45px}}@media print{nav,#progress,.copy,.nav-toggle{display:none!important}main{margin:0}article{max-width:none;padding:0;box-shadow:none}h2{break-before:page}pre{white-space:pre-wrap;color:#000;background:#eee}}
+    section{scroll-margin-top:20px}h2{margin:76px 0 22px;padding:12px 0 8px;color:var(--green);font-size:32px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}h3{margin:38px 0 12px;font-size:23px}.chapter{font-size:.55em;vertical-align:.35em}p,ul,table,pre,.callout,.grid,.flow,.boundary,details{max-width:var(--measure)}a{color:var(--green)}code{padding:.14em .34em;background:#eef2ee;border-radius:4px;font:88% var(--mono)}
+    pre{position:relative;overflow:auto;margin:14px 0 6px;padding:20px 58px 20px 22px;color:#dce8df;background:var(--code);border-left:4px solid var(--green);border-radius:8px;font:13px/1.58 var(--mono)}pre code{padding:0;color:inherit;background:none;font:inherit}.copy{position:absolute;top:10px;right:10px;padding:5px 8px;color:#d8ebe0;background:#34483a;border:0;border-radius:5px;font:11px var(--sans);cursor:pointer}.copy:hover{color:#fff;background:var(--green)}.sh-command{color:#82d99d;font-weight:700}.sh-option{color:#f0bc70}.sh-string{color:#b9d8ff}.sh-comment{color:#829087;font-style:italic}.sh-variable{color:#d6a6ef}
+    details.output{margin:0 0 26px}details.output summary{padding:4px 2px;color:var(--green);font-size:12px;font-weight:700;cursor:pointer}details.output[open] summary{margin-bottom:7px}details.output pre{margin:0;max-height:430px;padding-right:22px;color:#dce8df;background:#26362d;border-left:0;white-space:pre-wrap}.output pre code{color:inherit}.output .copy{display:none}
+    .callout{margin:24px 0;padding:17px 21px;background:linear-gradient(135deg,#fafcfb,var(--light));border-left:4px solid var(--green);border-radius:0 8px 8px 0}.callout.warn{background:#fff7e9;border-color:var(--amber)}.callout.stop{background:#fff1ef;border-color:var(--red)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{padding:18px;background:#fff;border:1px solid var(--rule);border-radius:8px}.card h3{margin-top:0;color:var(--dark)}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:24px 0}.step{position:relative;padding:14px 8px;text-align:center;background:var(--light);border:1px solid #afd0b8;border-radius:7px;font-size:12px;font-weight:700}.step:not(:last-child):after{position:absolute;top:50%;right:-8px;z-index:2;color:var(--green);content:"›";font-size:22px;transform:translateY(-53%)}table{width:100%;margin:20px 0 28px;border-collapse:collapse;font-size:14px}th,td{padding:11px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule)}th{color:#fff;background:var(--green)}tbody tr:nth-child(even){background:#f7f9f7}.boundary{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;margin:23px 0}.boundary>div{padding:18px;border:1px solid var(--rule);border-radius:8px}.boundary .arrow{align-self:center;padding:0;border:0;color:var(--green);font-size:27px}.boundary h3{margin-top:0}.boundary ul{margin-bottom:0;padding-left:19px}footer{margin-top:80px;padding-top:27px;color:var(--muted);border-top:3px solid var(--green);font-size:13px}
+    @media(max-width:960px){nav{position:static;width:auto;padding-bottom:20px}.nav-toggle{display:block}nav .part,nav>a:not(.brand),nav .nav-note{display:none}nav.open .part{display:block}nav.open>a:not(.brand){display:inline-block}nav.open .nav-note{display:block}main{margin-left:0}article{padding:28px 24px 80px}}@media(max-width:650px){.hero-art{float:none;width:190px;margin:0 0 15px}.grid,.flow,.boundary{grid-template-columns:1fr}.step:not(:last-child):after,.boundary .arrow{display:none}h2{font-size:28px}table{display:block;overflow-x:auto}pre{padding-right:45px}}@media print{nav,#progress,.copy,.nav-toggle{display:none!important}main{margin:0}article{max-width:none;padding:0;box-shadow:none}h2{break-before:page}pre{white-space:pre-wrap;color:#000;background:#eee}}
   </style>
 </head>
 <body>
@@ -25,265 +23,133 @@
   <a class="brand" href="https://www.expectedparrot.com/"><strong>Expected Parrot</strong><small>Open-source agent tools</small></a>
   <div class="book">Hutz Law runs<br>on Niles</div>
   <button class="nav-toggle" type="button" aria-expanded="false">Show tutorial contents</button>
-  <div class="part">Start here</div><a href="#orientation">1. What Niles does</a><a href="#model">2. The data model</a><a href="#install">3. Install &amp; initialize</a>
+  <div class="part">Foundations</div><a href="#orientation">1. What Niles does</a><a href="#model">2. The data model</a><a href="#start">3. Start the CRM</a>
   <div class="part">Run the practice</div><a href="#clients">4. Add clients</a><a href="#interactions">5. Log interactions</a><a href="#tasks">6. Keep promises</a><a href="#reviews">7. Run reviews</a>
   <div class="part">Work with EP</div><a href="#intake">8. Find new clients</a><a href="#status-requests">9. Ask what changed</a><a href="#recommendations">10. Get recommendations</a>
-  <div class="part">Operate safely</div><a href="#search">11. Search &amp; audit</a><a href="#sync">12. Sync &amp; restore</a><a href="#reference">13. Command map</a>
-  <div class="nav-note">A complete, copyable tutorial. Niles stays local; the <code>ep</code> CLI owns publishing, retrieval, and model execution.</div>
+  <div class="part">Operate safely</div><a href="#audit">11. Search &amp; audit</a><a href="#sync">12. Sync &amp; restore</a><a href="#reference">13. Command map</a>
+  <div class="nav-note">Every example shows one command and its collapsed representative JSON envelope. Niles stays local; <code>ep</code> owns network work.</div>
 </nav>
 <main><article>
-  <header>
-    <img class="hero-art" src="assets/niles-artwork.png" alt="Niles CRM artwork">
-    <div class="eyebrow">Expected Parrot · Local-first relationship operations</div>
-    <h1>A CRM even Lionel Hutz can operate</h1>
-    <p class="dek">Niles gives an agent a safe command layer for clients, conversations, promises, intake forms, and follow-up—without turning a relationship history into an opaque SaaS database.</p>
-    <div class="meta"><span>Package: <strong>niles</strong></span><span>Interface: <strong>JSON CLI</strong></span><span>Storage: <strong>local-first</strong></span><span>Example firm: <strong>Hutz Law</strong></span></div>
-  </header>
+  <header><img class="hero-art" src="assets/niles-artwork.png" alt="Niles CRM artwork"><div class="eyebrow">Expected Parrot · Local-first relationship operations</div><h1>A CRM even Lionel Hutz can operate</h1><p class="dek">Niles gives an agent a safe command layer for clients, conversations, promises, intake forms, and follow-up—without turning relationship history into an opaque SaaS database.</p><div class="meta"><span>Package: <strong>niles</strong></span><span>Interface: <strong>JSON CLI</strong></span><span>Storage: <strong>local-first</strong></span><span>Example: <strong>Hutz Law</strong></span></div></header>
 
-  <section id="orientation">
-    <h2><span class="chapter">01</span> What Niles does</h2>
-    <p>Lionel Hutz has prospects, clients, phone calls, promises, referrals, and a recurring problem: none of them stay connected. Niles turns those fragments into an auditable relationship workflow that both Lionel and his agent can operate.</p>
-    <div class="grid">
-      <div class="card"><h3>Remember the relationship</h3><p>Contacts, organizations, notes, traits, tags, and source history remain connected and searchable.</p></div>
-      <div class="card"><h3>Remember the promise</h3><p>Every next step becomes an assignable, dated task rather than a sentence buried in a call note.</p></div>
-      <div class="card"><h3>Invite new information</h3><p>EDSL surveys support internal debriefs, human intake, and targeted client-status requests.</p></div>
-      <div class="card"><h3>Keep humans in control</h3><p>Imported responses and model recommendations enter review queues. Nothing changes client records until accepted.</p></div>
-    </div>
-    <div class="callout"><strong>The operating idea.</strong> An agent uses commands, not storage files. Every command returns one structured JSON envelope with data, warnings, errors, and safe next steps.</div>
+  <section id="orientation"><h2><span class="chapter">01</span> What Niles does</h2><p>Lionel Hutz has prospects, clients, calls, promises, and a recurring problem: none of them stay connected. Niles turns those fragments into an auditable workflow.</p><div class="grid"><div class="card"><h3>Remember relationships</h3><p>Contacts, notes, traits, tags, and source history remain searchable.</p></div><div class="card"><h3>Remember promises</h3><p>Next steps become assigned, dated tasks rather than buried sentences.</p></div><div class="card"><h3>Invite information</h3><p>EDSL surveys support debriefs, human intake, and status requests.</p></div><div class="card"><h3>Keep control</h3><p>Responses and recommendations remain quarantined until reviewed.</p></div></div><div class="callout"><strong>The operating idea.</strong> Agents use commands, not storage files. Every command returns one versioned JSON envelope containing data, warnings, errors, and next steps.</div></section>
+
+  <section id="model"><h2><span class="chapter">02</span> The base data model</h2><table><thead><tr><th>Object</th><th>Hutz Law example</th><th>Behavior</th></tr></thead><tbody><tr><td>Contact</td><td>Burns Industries</td><td>Identity, company, cadence, traits, tags</td></tr><tr><td>Note</td><td>Liability call</td><td>Timestamped interaction history</td></tr><tr><td>Task</td><td>Send engagement outline</td><td>Assigned, dated, stateful promise</td></tr><tr><td>Survey</td><td>Client debrief</td><td>Questions with deterministic routes</td></tr><tr><td>Form</td><td>EP intake registration</td><td>Remote metadata recorded locally</td></tr><tr><td>Submission</td><td>New prospect answers</td><td>Quarantined until review</td></tr><tr><td>Recommendation</td><td>Proposed follow-up</td><td>Becomes a task only when accepted</td></tr></tbody></table><p>Every mutation appends an event. The local index is rebuildable, making history, undo, integrity checks, and cloning share one source of truth.</p></section>
+
+  <section id="start"><h2><span class="chapter">03</span> Start the Hutz Law CRM</h2><p>From an empty project directory, initialize Niles:</p>
+    <pre class="command" data-command="init" data-result='{"project_root":"/work/hutz-law","initialized":true}'><code>niles init</code></pre>
+    <p>Then ask for state-aware operating guidance:</p>
+    <pre class="command" data-command="agent next" data-result='{"initialized":true,"counts":{"contacts":0,"open_tasks":0},"state_contract":{"storage":"managed_by_niles"}}'><code>niles agent next</code></pre>
+    <div class="callout"><strong>No storage ceremony.</strong> Niles manages the event log, index, surveys, and EP exchange artifacts. Users do not inspect or stage internal files.</div>
   </section>
 
-  <section id="model">
-    <h2><span class="chapter">02</span> The base data model</h2>
-    <p>Niles is deliberately small. A contact is the center of the graph; notes explain what happened, tasks state what must happen, and surveys turn repeatable questions into deterministic updates.</p>
-    <table><thead><tr><th>Object</th><th>What it means at Hutz Law</th><th>Important behavior</th></tr></thead><tbody>
-      <tr><td><strong>Contact</strong></td><td>Burns Industries or Waylon Smithers</td><td>Name, company, role, email, cadence, traits, and tags</td></tr>
-      <tr><td><strong>Note</strong></td><td>A liability call or engagement discussion</td><td>Timestamped interaction history with a source kind</td></tr>
-      <tr><td><strong>Task</strong></td><td>Send the engagement outline by Friday</td><td>Open, done, blocked, or cancelled; optionally assigned and dated</td></tr>
-      <tr><td><strong>Survey</strong></td><td>A client debrief or intake questionnaire</td><td>Questions plus deterministic routes into notes, traits, and tasks</td></tr>
-      <tr><td><strong>Form</strong></td><td>A locally registered EP human survey</td><td>Connects remote metadata to a local intake or status workflow</td></tr>
-      <tr><td><strong>Submission</strong></td><td>A prospective client’s answers</td><td>Quarantined until accepted, merged, or rejected</td></tr>
-      <tr><td><strong>Recommendation</strong></td><td>A proposed next relationship action</td><td>Quarantined until accepted as a task or rejected</td></tr>
-    </tbody></table>
-    <p>Every mutation appends an event. The local index can be rebuilt from that history, so <code>history</code>, <code>undo</code>, <code>fsck</code>, and cloning all share one source of truth.</p>
-  </section>
-
-  <section id="install">
-    <h2><span class="chapter">03</span> Install and initialize Hutz Law</h2>
-    <pre><code>python -m pip install "niles[edsl] @ git+https://github.com/expectedparrot/niles.git"
-
-mkdir hutz-law
-cd hutz-law
-git init
-niles init
-niles agent next</code></pre>
-    <p><code>niles agent next</code> is the orientation endpoint for an agent. It reports counts, the command contract, safe handoff sequences, and the next useful action.</p>
-    <details class="output"><summary>What the envelope guarantees</summary><pre><code>{
-  "schema_version": "niles.envelope.v1",
-  "status": "ok",
-  "command": "agent next",
-  "data": {
-    "initialized": true,
-    "state_contract": {"storage": "managed_by_niles"}
-  },
-  "warnings": [],
-  "errors": [],
-  "next_steps": []
-}</code></pre></details>
-    <div class="callout"><strong>No storage ceremony.</strong> Niles manages its event log, index, survey definitions, and EP exchange artifacts. Users and agents work through commands; they do not inspect or stage internal files.</div>
-  </section>
-
-  <section id="clients">
-    <h2><span class="chapter">04</span> Add clients and the people around them</h2>
-    <p>Start with Burns Industries as the account and Smithers as the person Lionel actually speaks with.</p>
-    <pre><code>niles contact add "Burns Industries" \
+  <section id="clients"><h2><span class="chapter">04</span> Add clients and the people around them</h2><p>Add Burns Industries as a prospective account:</p>
+    <pre class="command" data-command="contact add" data-result='{"contact":{"id":"con_burns","name":"Burns Industries","slug":"burns-industries","tags":["prospect"],"traits":{"priority":1},"cadence_days":14},"events_written":1}'><code>niles contact add "Burns Industries" \
   --tag prospect \
-  --trait source=ambulance-adjacent-referral \
   --trait priority=1 \
-  --cadence-days 14
-
-niles contact add "Waylon Smithers" \
+  --cadence-days 14</code></pre>
+    <p>Add Smithers as the person Lionel speaks with:</p>
+    <pre class="command" data-command="contact add" data-result='{"contact":{"id":"con_smithers","name":"Waylon Smithers","company":"Burns Industries","role":"Executive Assistant","emails":["smithers@burns.example"]},"events_written":1}'><code>niles contact add "Waylon Smithers" \
   --company "Burns Industries" \
   --role "Executive Assistant" \
   --email smithers@burns.example \
-  --tag decision-maker
-
-niles contact list --tag prospect
-niles contact show burns-industries</code></pre>
-    <p>References can be exact IDs, emails, or unambiguous slugs. Reuse the identifiers returned in envelopes for mutations.</p>
-    <pre><code>niles contact update burns-industries --trait priority=2
-niles contact tag burns-industries --add active-opportunity --remove prospect
-niles contact merge burns-industries duplicate-burns \
-  --note "Consolidate duplicate account"</code></pre>
+  --tag decision-maker</code></pre>
+    <p>Inspect the account by its stable slug:</p>
+    <pre class="command" data-command="contact show" data-result='{"contact":{"id":"con_burns","name":"Burns Industries","slug":"burns-industries","tags":["prospect"],"archived":false}}'><code>niles contact show burns-industries</code></pre>
   </section>
 
-  <section id="interactions">
-    <h2><span class="chapter">05</span> Log an interaction, then debrief it</h2>
-    <pre><code>niles note add burns-industries \
+  <section id="interactions"><h2><span class="chapter">05</span> Log an interaction, then debrief it</h2><p>Record what happened on the call:</p>
+    <pre class="command" data-command="note add" data-result='{"note":{"id":"note_liability","contact_id":"con_burns","kind":"call","text":"Discussed workplace liability. Smithers requested an engagement outline."},"events_written":1}'><code>niles note add burns-industries \
   "Discussed workplace liability. Smithers requested an engagement outline." \
-  --kind call
-
-niles note list burns-industries
-niles contact show burns-industries --with-notes</code></pre>
-    <p>Free-form notes record what happened. Surveys handle repeatable structure.</p>
-    <pre><code>niles survey copy debrief client-debrief
-niles survey show client-debrief
-niles survey run client-debrief --contact burns-industries
-
-niles survey run client-debrief \
+  --kind call</code></pre>
+    <p>Preview a structured debrief before routing any answers:</p>
+    <pre class="command" data-command="survey run" data-result='{"survey":"debrief","contact":{"id":"con_burns","name":"Burns Industries"},"dry_run":true,"preview":[{"action":"add_note"},{"action":"create_task"}],"events_written":0}'><code>niles survey run debrief \
   --contact burns-industries \
   --answers debrief-answers.json \
-  --dry-run
-
-niles survey run client-debrief \
+  --dry-run</code></pre>
+    <p>Apply the same deterministic routes after reviewing the preview:</p>
+    <pre class="command" data-command="survey run" data-result='{"survey":"debrief","contact":{"id":"con_burns","name":"Burns Industries"},"dry_run":false,"events_written":3}'><code>niles survey run debrief \
   --contact burns-industries \
   --answers debrief-answers.json</code></pre>
-    <div class="callout"><strong>Preview first.</strong> Deterministic routes can append notes, set traits, add tags, and create tasks. <code>--dry-run</code> shows those mutations without writing events.</div>
   </section>
 
-  <section id="tasks">
-    <h2><span class="chapter">06</span> Turn promises into work</h2>
-    <pre><code>niles task add burns-industries \
+  <section id="tasks"><h2><span class="chapter">06</span> Turn promises into work</h2><p>Create the promised follow-up:</p>
+    <pre class="command" data-command="task add" data-result='{"task":{"id":"task_outline","contact_id":"con_burns","text":"Send engagement outline","due_date":"2026-09-10","assignee":"lionel","status":"open"},"events_written":1}'><code>niles task add burns-industries \
   "Send engagement outline" \
   --due 2026-09-10 \
   --assign lionel \
-  --tag proposal
-
-niles task list --assignee lionel
-niles task update &lt;task-id&gt; --due 2026-09-11
-niles task done &lt;task-id&gt; --note "Sent to Smithers"
-niles task suggest --assignee lionel</code></pre>
-    <p><code>task suggest</code> is local prioritization, not a model call. Give the agent enough firm context to make the surrounding record useful:</p>
-    <pre><code>niles org context set \
-  "A scrappy Springfield law practice seeking legitimate recurring clients." \
-  --name "Hutz Law" \
-  --trait principal=lionel
-
-niles teammate add "Lionel Hutz" --alias lionel --role attorney
-niles material add "Engagement letter" \
-  --path templates/engagement.pdf --tag sales</code></pre>
+  --tag proposal</code></pre>
+    <p>See Lionel’s open promises:</p>
+    <pre class="command" data-command="task list" data-result='{"tasks":[{"id":"task_outline","contact":"Burns Industries","text":"Send engagement outline","due_date":"2026-09-10","assignee":"lionel","status":"open"}]}'><code>niles task list --assignee lionel</code></pre>
+    <p>Close the loop when the outline is sent:</p>
+    <pre class="command" data-command="task done" data-result='{"task":{"id":"task_outline","status":"done"},"completion_note":"Sent to Smithers","events_written":1}'><code>niles task done task_outline --note "Sent to Smithers"</code></pre>
   </section>
 
-  <section id="reviews">
-    <h2><span class="chapter">07</span> Surface neglect before clients disappear</h2>
-    <pre><code>niles status
-niles contact list --stale
-niles survey run review --contact burns-industries
-niles report status --html hutz-status.html</code></pre>
-    <p>Cadence makes neglect measurable. List stale contacts, then run the built-in review survey for each relationship that needs attention. The HTML report provides a shareable local snapshot.</p>
-    <div class="grid"><div class="card"><h4>Pipeline</h4><p>Tags and traits distinguish prospects, clients, referrals, and active opportunities.</p></div><div class="card"><h4>Activity</h4><p>Notes and events show which relationships are moving.</p></div><div class="card"><h4>Neglect</h4><p>Cadence compares the last interaction with expected follow-up.</p></div><div class="card"><h4>Promises</h4><p>Task views expose overdue, assigned, and blocked work.</p></div></div>
+  <section id="reviews"><h2><span class="chapter">07</span> Surface neglect before clients disappear</h2><p>List relationships that have exceeded their cadence:</p>
+    <pre class="command" data-command="contact list" data-result='{"contacts":[{"id":"con_burns","name":"Burns Industries","cadence_days":14,"stale":true}],"count":1}'><code>niles contact list --stale</code></pre>
+    <p>Create a shareable local status view:</p>
+    <pre class="command" data-command="report status" data-result='{"path":"/work/hutz-law/hutz-status.html","contacts":2,"open_tasks":0}'><code>niles report status --html hutz-status.html</code></pre>
   </section>
 
-  <section id="intake">
-    <h2><span class="chapter">08</span> Find new clients with human intake</h2>
-    <p>Lionel wants a public intake form. Niles prepares and records the workflow, but it never contacts Expected Parrot.</p>
-    <div class="boundary"><div><h4>Niles · local</h4><ul><li>Export the Survey</li><li>Manage exchange paths</li><li>Register metadata</li><li>Import into quarantine</li><li>Apply review decisions</li></ul></div><div class="arrow">⇄</div><div><h4>EP · network</h4><ul><li>Publish the human survey</li><li>Host respondent access</li><li>Retrieve responses</li><li>Own authentication</li></ul></div></div>
-    <pre><code>niles intake export intake-basic
-# Run data.publish_command from the returned envelope.
-
-niles intake register intake-basic
-# Run data.pull_command from the returned envelope.
-
-niles intake import &lt;local-form-id&gt;
-niles intake status
-niles intake review</code></pre>
-    <p>The final decision is explicit:</p>
-    <pre><code>niles intake review &lt;submission-id&gt; --accept
-niles intake review &lt;submission-id&gt; --merge burns-industries
-niles intake review &lt;submission-id&gt; --reject \
-  --note "Prank call from Bart"
-
-niles intake close &lt;form-id&gt;</code></pre>
-    <div class="callout warn"><strong>Untrusted until reviewed.</strong> Import never creates or edits a client. Acceptance creates a contact and applies safe routes; merge attaches information to an existing relationship; rejection preserves the audit record without mutation.</div>
+  <section id="intake"><h2><span class="chapter">08</span> Find new clients with human intake</h2><div class="boundary"><div><h3>Niles · local</h3><ul><li>Exports surveys</li><li>Manages paths</li><li>Registers metadata</li><li>Imports to quarantine</li></ul></div><div class="arrow">⇄</div><div><h3>EP · network</h3><ul><li>Publishes forms</li><li>Hosts respondents</li><li>Retrieves responses</li><li>Owns credentials</li></ul></div></div><p>Export the intake survey locally:</p>
+    <pre class="command" data-command="intake export" data-result='{"kind":"intake","survey":"intake-basic","managed":true,"network":false,"publish_command":"ep humanize create --survey [managed] --name Niles-intake &gt; [managed]"}'><code>niles intake export intake-basic</code></pre>
+    <p>Run the returned <code>data.publish_command</code> with EP. Then register its output:</p>
+    <pre class="command" data-command="intake register" data-result='{"form":{"id":"form_intake","kind":"intake","remote_uuid":"remote-intake"},"pull_command":"ep humanize responses remote-intake --output [managed]","events_written":1}'><code>niles intake register intake-basic</code></pre>
+    <p>Run the returned <code>data.pull_command</code>, then import responses:</p>
+    <pre class="command" data-command="intake import" data-result='{"form":{"id":"form_intake"},"received":1,"skipped":0,"quarantined":true,"network":false}'><code>niles intake import form_intake</code></pre>
+    <p>Nothing changes a relationship until Lionel accepts, merges, or rejects:</p>
+    <pre class="command" data-command="intake review" data-result='{"submission_id":"sub_mcbain","status":"accepted","matched_contact_id":"con_mcbain"}'><code>niles intake review sub_mcbain --accept</code></pre>
+    <div class="callout warn"><strong>Untrusted until reviewed.</strong> Import is idempotent and never creates or edits a client. The explicit review decision is the mutation gate.</div>
   </section>
 
-  <section id="status-requests">
-    <h2><span class="chapter">09</span> Ask a known client what changed</h2>
-    <p>A status request uses the same boundary but targets a known relationship and recipient.</p>
-    <pre><code>niles status-request export client-debrief
-# Run data.publish_command.
-
-niles status-request register client-debrief \
+  <section id="status-requests"><h2><span class="chapter">09</span> Ask a known client what changed</h2><p>Export a debrief for Burns Industries:</p>
+    <pre class="command" data-command="status-request export" data-result='{"kind":"status-request","survey":"client-debrief","managed":true,"network":false,"publish_command":"ep humanize create --survey [managed] --name Niles-status-request &gt; [managed]"}'><code>niles status-request export client-debrief</code></pre>
+    <p>After EP publishes it, connect the registration to Burns and Smithers:</p>
+    <pre class="command" data-command="status-request register" data-result='{"form":{"id":"form_status","kind":"status-request","contact_id":"con_burns","recipient":"smithers@burns.example"},"pull_command":"ep humanize responses remote-status --output [managed]"}'><code>niles status-request register client-debrief \
   --contact burns-industries \
-  --recipient smithers@burns.example
-# Run data.pull_command.
-
-niles status-request import &lt;local-form-id&gt;
-niles status-request status
-niles status-request review
-niles status-request review &lt;submission-id&gt; --accept</code></pre>
-    <p>Accepted answers follow deterministic routes into the existing contact. Rejected answers remain in history and make no relationship change.</p>
+  --recipient smithers@burns.example</code></pre>
+    <p>After running the returned pull command, import the local result:</p>
+    <pre class="command" data-command="status-request import" data-result='{"form":{"id":"form_status"},"received":1,"quarantined":true,"network":false}'><code>niles status-request import form_status</code></pre>
+    <p>Accept the routed update only after inspecting it:</p>
+    <pre class="command" data-command="status-request review" data-result='{"submission_id":"sub_status","status":"accepted","matched_contact_id":"con_burns"}'><code>niles status-request review sub_status --accept</code></pre>
   </section>
 
-  <section id="recommendations">
-    <h2><span class="chapter">10</span> Ask a model for the next relationship action</h2>
-    <p>Niles can package selected CRM context as an EDSL job. The model runs outside Niles, and every proposed action returns to quarantine.</p>
-    <pre><code>niles recommend export next-steps --tag prospect
-# Run data.run_command with ep.
-
-niles recommend import --name next-steps
-niles recommend review
-niles recommend accept &lt;recommendation-id&gt; \
+  <section id="recommendations"><h2><span class="chapter">10</span> Ask a model for the next relationship action</h2><p>Package prospect context as an EDSL job:</p>
+    <pre class="command" data-command="recommend export" data-result='{"contacts":1,"managed":true,"network":false,"run_command":"ep run [managed-job] --output [managed-results]"}'><code>niles recommend export next-steps --tag prospect</code></pre>
+    <p>Run <code>data.run_command</code> with EP, then import the result:</p>
+    <pre class="command" data-command="recommend import" data-result='{"imported":1,"recommendation_ids":["rec_followup"],"quarantined":true}'><code>niles recommend import --name next-steps</code></pre>
+    <p>Only acceptance turns the proposal into a task:</p>
+    <pre class="command" data-command="recommend accept" data-result='{"recommendation_id":"rec_followup","status":"accepted","task":{"text":"Call Smithers about the engagement outline","assignee":"lionel","due_date":"2026-09-15"}}'><code>niles recommend accept rec_followup \
   --assign lionel \
-  --due 2026-09-15
-niles recommend reject &lt;recommendation-id&gt;</code></pre>
-    <div class="flow"><div class="step">Project CRM context</div><div class="step">Export EDSL job</div><div class="step">Run with ep</div><div class="step">Import to quarantine</div><div class="step">Accept as task</div></div>
-    <div class="callout stop"><strong>The review gate is structural.</strong> Importing a recommendation cannot create a task. Only <code>recommend accept</code> can do that.</div>
+  --due 2026-09-15</code></pre>
+    <div class="flow"><div class="step">Project context</div><div class="step">Export job</div><div class="step">Run with EP</div><div class="step">Import quarantined</div><div class="step">Accept as task</div></div><div class="callout stop"><strong>The review gate is structural.</strong> Importing a recommendation cannot create a task.</div>
   </section>
 
-  <section id="search">
-    <h2><span class="chapter">11</span> Search, inspect, and undo</h2>
-    <pre><code>niles search "workplace liability"
-niles search "engagement letter"
-niles history --contact burns-industries --limit 20
-niles undo &lt;event-id&gt;
-niles fsck
-niles rebuild-index</code></pre>
-    <p>Search spans names, notes, traits, tags, and tasks. Undo appends a compensating event and refuses unsafe reversals with dependents.</p>
-    <pre><code>niles import csv prospects.csv
-niles import csv prospects.csv --commit
-niles export csv --tag prospect
-niles export json</code></pre>
-    <p>CSV import is a preview by default. Mapping mistakes should be visible before they become relationship history.</p>
+  <section id="audit"><h2><span class="chapter">11</span> Search, inspect, and undo</h2><p>Search across names, notes, traits, tags, and tasks:</p>
+    <pre class="command" data-command="search" data-result='{"query":"workplace liability","results":[{"type":"note","contact":"Burns Industries","text":"Discussed workplace liability…"}]}'><code>niles search "workplace liability"</code></pre>
+    <p>Inspect the relationship’s append-only history:</p>
+    <pre class="command" data-command="history" data-result='{"events":[{"event_id":"evt_call","event_type":"note_created"},{"event_id":"evt_task","event_type":"task_created"}]}'><code>niles history --contact burns-industries --limit 20</code></pre>
+    <p>Verify that durable history and its projection agree:</p>
+    <pre class="command" data-command="fsck" data-result='{"valid":true,"events":12,"errors":[],"counts":{"contacts":2,"open_tasks":1}}'><code>niles fsck</code></pre>
   </section>
 
-  <section id="sync">
-    <h2><span class="chapter">12</span> Sync and restore without storage bookkeeping</h2>
-    <pre><code>niles sync --dry-run
-niles sync --message "Update Hutz Law CRM"
-
-niles sync --no-push --message "Before the Burns meeting"</code></pre>
-    <p>Niles knows which state is durable. It commits only that state, excludes its rebuildable index and managed exchange artifacts, preserves unrelated staged work, and pushes unless <code>--no-push</code> is set.</p>
-    <pre><code>niles export hutz-law.zip
-
-mkdir hutz-law-restored
-cd hutz-law-restored
-niles import /path/to/hutz-law.zip
-niles fsck</code></pre>
-    <p>Archives contain durable CRM history and rebuild their local index after import. Existing state is protected unless <code>--replace</code> is explicit.</p>
+  <section id="sync"><h2><span class="chapter">12</span> Sync and restore without bookkeeping</h2><p>Preview exactly what Niles would commit and push:</p>
+    <pre class="command" data-command="sync" data-result='{"dry_run":true,"changes":["durable CRM updates"],"committed":false,"pushed":false}'><code>niles sync --dry-run</code></pre>
+    <p>Commit durable CRM state and push it:</p>
+    <pre class="command" data-command="sync" data-result='{"committed":true,"commit":"abc1234","pushed":true,"excluded":["rebuildable index","managed exchange files"]}'><code>niles sync --message "Update Hutz Law CRM"</code></pre>
+    <p>Create a portable archive when Git is not the transport:</p>
+    <pre class="command" data-command="export" data-result='{"path":"/work/hutz-law/hutz-law.zip","events":12,"contacts":2}'><code>niles export hutz-law.zip</code></pre>
   </section>
 
-  <section id="reference">
-    <h2><span class="chapter">13</span> Command map</h2>
-    <table><thead><tr><th>Goal</th><th>Commands</th></tr></thead><tbody>
-      <tr><td>Orient an agent</td><td><code>agent next</code>, <code>status</code></td></tr>
-      <tr><td>Manage relationships</td><td><code>contact add|show|list|update|tag|archive|merge</code></td></tr>
-      <tr><td>Record work</td><td><code>note add|list</code>, <code>task add|list|update|done|reassign|cancel|suggest</code></td></tr>
-      <tr><td>Add context</td><td><code>org context set|show</code>, <code>teammate add|list|show</code>, <code>material add|list</code></td></tr>
-      <tr><td>Run structured prompts</td><td><code>survey list|show|copy|run|export-edsl</code>, <code>review</code></td></tr>
-      <tr><td>Handle human forms</td><td><code>intake export|register|import|status|review|close</code>, <code>status-request export|register|import|status|review</code></td></tr>
-      <tr><td>Handle model proposals</td><td><code>recommend export|import|review|accept|reject</code></td></tr>
-      <tr><td>Audit and move state</td><td><code>search</code>, <code>history</code>, <code>undo</code>, <code>fsck</code>, <code>sync</code>, <code>export</code>, <code>import</code></td></tr>
-    </tbody></table>
-    <div class="callout"><strong>When a view is missing, treat it as a feature gap.</strong> Do not bypass the command layer by reading internal storage. The CLI envelope is the supported agent interface.</div>
-    <p><span class="pill">local-first</span><span class="pill">append-only</span><span class="pill">agent-safe JSON</span><span class="pill">review-gated</span><span class="pill">EDSL handoffs</span><span class="pill">Git sync</span></p>
-  </section>
+  <section id="reference"><h2><span class="chapter">13</span> Command map</h2><table><thead><tr><th>Goal</th><th>Commands</th></tr></thead><tbody><tr><td>Orient</td><td><code>agent next</code>, <code>status</code></td></tr><tr><td>Relationships</td><td><code>contact add|show|list|update|tag|archive|merge</code></td></tr><tr><td>Work</td><td><code>note add|list</code>, <code>task add|list|update|done|reassign|cancel|suggest</code></td></tr><tr><td>Surveys</td><td><code>survey list|show|copy|run|export-edsl</code></td></tr><tr><td>Human forms</td><td><code>intake export|register|import|status|review|close</code>, <code>status-request export|register|import|status|review</code></td></tr><tr><td>Model proposals</td><td><code>recommend export|import|review|accept|reject</code></td></tr><tr><td>Audit and move</td><td><code>search</code>, <code>history</code>, <code>undo</code>, <code>fsck</code>, <code>sync</code>, <code>export</code>, <code>import</code></td></tr></tbody></table><div class="callout"><strong>A missing view is a feature gap.</strong> Do not bypass the command layer by reading internal storage. The JSON envelope is the supported agent interface.</div></section>
 
-  <footer>Niles is an open-source Expected Parrot package. Read the <a href="https://github.com/expectedparrot/niles">source and README on GitHub</a>. This fictional legal practice is used only as a running example.</footer>
+  <footer>Niles is an open-source Expected Parrot package. Read the <a href="https://github.com/expectedparrot/niles">source and README on GitHub</a>. The fictional legal practice is used only as a running example.</footer>
 </article></main>
 <script>
-  document.querySelectorAll('pre').forEach(function(pre){var button=document.createElement('button');button.className='copy';button.type='button';button.textContent='Copy';button.setAttribute('aria-label','Copy code');button.addEventListener('click',function(){navigator.clipboard.writeText(pre.innerText.replace(/Copy$/,'').trim()).then(function(){button.textContent='Copied';setTimeout(function(){button.textContent='Copy'},1200)})});pre.appendChild(button)});
-  var nav=document.querySelector('nav'),toggle=document.querySelector('.nav-toggle');toggle.addEventListener('click',function(){nav.classList.toggle('open');toggle.setAttribute('aria-expanded',nav.classList.contains('open'))});
-  var links=[].slice.call(document.querySelectorAll('nav a[href^="#"]')),sections=links.map(function(a){return document.querySelector(a.getAttribute('href'))});function update(){var height=document.documentElement.scrollHeight-innerHeight;document.getElementById('progress').style.width=(height?scrollY/height*100:0)+'%';var current=sections[0];sections.forEach(function(s){if(s&&s.getBoundingClientRect().top<180)current=s});links.forEach(function(a){a.classList.toggle('active',current&&a.getAttribute('href')==='#'+current.id)})}addEventListener('scroll',update,{passive:true});update();
+  function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function bash(source){var placeholders=[];var text=escapeHtml(source);text=text.replace(/(&quot;[^\n]*?&quot;|&#39;[^\n]*?&#39;)/g,function(v){placeholders.push('<span class="sh-string">'+v+'</span>');return '@@S'+(placeholders.length-1)+'@@'});text=text.replace(/(^|\s)(#[^\n]*)/g,'$1<span class="sh-comment">$2</span>');text=text.replace(/(^|\s)(--?[a-zA-Z][\w-]*)/g,'$1<span class="sh-option">$2</span>');text=text.replace(/\b(niles|ep|git)\b/g,'<span class="sh-command">$1</span>');text=text.replace(/(&lt;[^&]+&gt;)/g,'<span class="sh-variable">$1</span>');return text.replace(/@@S(\d+)@@/g,function(_,i){return placeholders[Number(i)]})}
+  document.querySelectorAll('pre.command').forEach(function(pre){var code=pre.querySelector('code'),source=code.textContent.trim();code.innerHTML=bash(source);var button=document.createElement('button');button.className='copy';button.type='button';button.textContent='Copy';button.addEventListener('click',function(){navigator.clipboard.writeText(source).then(function(){button.textContent='Copied';setTimeout(function(){button.textContent='Copy'},1200)})});pre.appendChild(button);var envelope={schema_version:'niles.envelope.v1',status:'ok',command:pre.dataset.command,argv:source.replace(/\\\n\s*/g,' ').split(/\s+/),data:JSON.parse(pre.dataset.result||'{}'),warnings:[],errors:[],next_steps:[]};var details=document.createElement('details');details.className='output';var summary=document.createElement('summary');summary.textContent='Show representative JSON envelope';var out=document.createElement('pre'),outCode=document.createElement('code');outCode.textContent=JSON.stringify(envelope,null,2);out.appendChild(outCode);details.appendChild(summary);details.appendChild(out);pre.after(details)});
+  var nav=document.querySelector('nav'),toggle=document.querySelector('.nav-toggle');toggle.addEventListener('click',function(){nav.classList.toggle('open');toggle.setAttribute('aria-expanded',nav.classList.contains('open'))});var links=[].slice.call(document.querySelectorAll('nav a[href^="#"]')),sections=links.map(function(a){return document.querySelector(a.getAttribute('href'))});function update(){var h=document.documentElement.scrollHeight-innerHeight;document.getElementById('progress').style.width=(h?scrollY/h*100:0)+'%';var current=sections[0];sections.forEach(function(s){if(s&&s.getBoundingClientRect().top<180)current=s});links.forEach(function(a){a.classList.toggle('active',current&&a.getAttribute('href')==='#'+current.id)})}addEventListener('scroll',update,{passive:true});update();
 </script>
 </body>
 </html>
