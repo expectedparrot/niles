@@ -893,6 +893,47 @@ def test_form_export_and_ep_registration_are_offline(tmp_path):
     assert payload["data"]["form"]["remote_uuid"] == "remote-intake"
 
 
+def test_human_update_exports_all_entities_with_current_status_and_skip_logic(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    first = run_niles(tmp_path, "contact", "add", "Burns Industries", "--tag", "company")[1]["data"]["contact"]
+    second = run_niles(tmp_path, "contact", "add", "Waylon Smithers", "--tag", "person", "--company", "Burns Industries")[1]["data"]["contact"]
+    assert run_niles(tmp_path, "contact", "status", first["id"], "Contract is with Mr. Burns")[0] == 0
+    assert run_niles(tmp_path, "note", "add", second["id"], "Waiting for a callback", "--at", "2026-09-01")[0] == 0
+
+    output = tmp_path / "update_job.ep"
+    code, payload = run_niles(tmp_path, "human-update", "--output", str(output))
+    if not importlib.util.find_spec("edsl"):
+        assert code == 1
+        assert payload["errors"][0]["code"] == "edsl_not_installed"
+        return
+
+    assert code == 0
+    data = payload["data"]
+    assert data["entities"] == 2
+    assert data["question_count"] == 4
+    assert data["network"] is False
+    assert data["publish_command"].startswith("ep humanize create --survey")
+    assert output.is_file()
+    manifest = json.loads(Path(data["manifest_path"]).read_text(encoding="utf-8"))
+    assert {route["contact_id"] for route in manifest["routing"].values()} == {first["id"], second["id"]}
+
+    from edsl import Survey
+
+    survey = Survey.load(str(output))
+    texts = [question.question_text for question in survey.questions]
+    assert any("Burns Industries" in text and "Contract is with Mr. Burns" in text for text in texts)
+    assert any("Waylon Smithers" in text and "Waiting for a callback" in text for text in texts)
+    assert len(survey.rule_collection.to_dict()["rules"]) > len(survey.questions)
+
+
+def test_human_update_requires_entities(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    code, payload = run_niles(tmp_path, "human-update", "--output", "update_job.ep")
+    if importlib.util.find_spec("edsl"):
+        assert code == 1
+        assert payload["errors"][0]["code"] == "no_entities"
+
+
 def test_managed_exchange_hides_storage_paths_from_routine_commands(tmp_path):
     assert run_niles(tmp_path, "init")[0] == 0
     code, exported = run_niles(tmp_path, "intake", "export", "intake-basic")

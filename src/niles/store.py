@@ -1663,6 +1663,70 @@ class Project:
         self.exchange_dir.mkdir(parents=True, exist_ok=True)
         return self.exchange_dir / filename
 
+    def export_human_update(self, output: Path) -> dict[str, Any]:
+        """Build an offline EDSL survey that asks for updates on every entity."""
+        try:
+            from edsl import QuestionFreeText, QuestionMultipleChoice, Survey
+        except ImportError as exc:
+            raise NilesError(
+                "edsl_not_installed",
+                "Human update export requires the optional edsl dependency. Install niles[edsl].",
+            ) from exc
+
+        contacts = sorted(self.list_contacts(), key=lambda item: item["name"].casefold())
+        if not contacts:
+            raise NilesError("no_entities", "Add at least one contact or organization before exporting a human update.")
+
+        questions = []
+        routing: dict[str, dict[str, str]] = {}
+        for contact in contacts:
+            notes = self.list_notes(contact["id"], limit=1)
+            status = str(contact.get("traits", {}).get("current_status") or (notes[0]["text"] if notes else "No status recorded"))
+            prefix = contact["id"].replace("-", "_")
+            changed_name = f"changed_{prefix}"
+            notes_name = f"notes_{prefix}"
+            changed = QuestionMultipleChoice(
+                question_name=changed_name,
+                question_text=f"{contact['name']}\n\nCurrent status: {status}\n\nHas anything changed?",
+                question_options=["No change", "Update"],
+            )
+            update = QuestionFreeText(
+                question_name=notes_name,
+                question_text=f"What changed for {contact['name']}? Add the status update or notes.",
+            )
+            questions.extend([changed, update])
+            routing[notes_name] = {"contact_id": contact["id"], "contact_name": contact["name"], "action": "append_note"}
+
+        survey = Survey(questions=questions, name="niles-human-update")
+        for contact in contacts:
+            prefix = contact["id"].replace("-", "_")
+            survey = survey.add_skip_rule(
+                f"notes_{prefix}",
+                f"{{{{ changed_{prefix}.answer }}}} == 'No change'",
+            )
+
+        path = output if output.is_absolute() else self.root / output
+        path.parent.mkdir(parents=True, exist_ok=True)
+        survey.save(str(path))
+        manifest_path = path.with_suffix(path.suffix + ".manifest.json")
+        manifest = {
+            "schema_version": "niles.human-update.v1",
+            "survey_path": str(path),
+            "entities": len(contacts),
+            "routing": routing,
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        publish_command = f"ep humanize create --survey {shlex.quote(str(path))} --name {shlex.quote('Niles status update')}"
+        return {
+            "path": str(path),
+            "manifest_path": str(manifest_path),
+            "entities": len(contacts),
+            "question_count": len(questions),
+            "network": False,
+            "publish_command": publish_command,
+            "next_command": publish_command,
+        }
+
     def export_form(self, kind: str, survey_name: str, output: Path | None = None) -> dict[str, Any]:
         definition = self.get_survey(survey_name)
         if kind == "intake":

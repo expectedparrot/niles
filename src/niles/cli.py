@@ -255,6 +255,9 @@ def build_parser() -> argparse.ArgumentParser:
     status_decision.add_argument("--reject", action="store_true")
     status_review.add_argument("--note")
 
+    human_update = sub.add_parser("human-update")
+    human_update.add_argument("--output", required=True)
+
     recommend = sub.add_parser("recommend")
     recommend_sub = recommend.add_subparsers(dest="recommend_command", required=True)
     recommend_export = recommend_sub.add_parser("export")
@@ -435,6 +438,8 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
         return dispatch_intake(project, args, argv)
     if args.command == "status-request":
         return dispatch_status_request(project, args, argv)
+    if args.command == "human-update":
+        return ok("human-update", argv, project.export_human_update(Path(args.output)))
     if args.command == "recommend":
         return dispatch_recommend(project, args, argv)
     if args.command == "report":
@@ -518,6 +523,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles survey list/show/copy/run/export-edsl",
                 "niles intake export/register/import/status/close/review",
                 "niles status-request export/register/import/status/review",
+                "niles human-update --output <update-job.ep>",
                 "niles recommend export/import/review/accept/reject",
                 "niles report status --html <path>",
                 "niles enrich ingest",
@@ -529,6 +535,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
             "managed_handoffs": {
                 "intake": ["niles intake export", "run data.publish_command", "niles intake register", "run data.pull_command", "niles intake import", "niles intake review"],
                 "status_request": ["niles status-request export", "run data.publish_command", "niles status-request register", "run data.pull_command", "niles status-request import", "niles status-request review"],
+                "human_update": ["niles human-update --output update-job.ep", "run data.publish_command"],
                 "recommendation": ["niles recommend export", "run data.run_command", "niles recommend import", "niles recommend review"],
             },
         },

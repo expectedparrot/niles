@@ -510,6 +510,26 @@ Accepted answers use deterministic survey routing. Rejected answers remain in
 history and cause no CRM mutation. As with intake, Niles performs no publishing,
 pulling, authentication, or other network activity.
 
+### Ask for updates on every entity
+
+Build one EDSL survey that walks a teammate through every active CRM entity:
+
+```bash
+niles human-update --output update_job.ep
+```
+
+Each entity shows its current status and asks whether anything changed. Choosing
+`No change` skips its notes field; choosing `Update` opens a free-text prompt.
+The command is offline and returns a `publish_command` such as:
+
+```bash
+ep humanize create --survey update_job.ep --name "Niles status update"
+```
+
+The adjacent `update_job.ep.manifest.json` records the stable Niles entity ID
+for every update question so retrieved answers can be routed without relying on
+mutable names. EP—not Niles—publishes the survey and requests responses.
+
 ## Recommendation jobs
 
 Niles prepares EDSL jobs but never runs models itself:
