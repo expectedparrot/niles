@@ -504,7 +504,8 @@ niles import /path/to/hutz-law.zip --replace
 7. Treat pulled human responses and recommendations as quarantined.
 8. Never accept or merge quarantined data without a review decision.
 9. Never store credentials in CRM state.
-10. Commit durable `.niles` files when provenance or sync is wanted.
+10. Use `niles sync` when provenance or remote sync is wanted; never stage or
+    manage Niles internal storage yourself.
 
 If a view is missing, that is a Niles feature gap—not a reason to bypass the
 command layer.

@@ -182,6 +182,19 @@ def test_agent_next_before_and_after_init(tmp_path):
     assert code == 0
     assert payload["data"]["initialized"] is True
     assert "how_it_works" in payload["data"]
+    instructions = json.dumps(payload["data"])
+    assert ".niles" not in instructions
+    assert "Niles publishes" not in instructions
+    assert payload["data"]["state_contract"]["storage"] == "managed_by_niles"
+    assert "exclusively publishes" in payload["data"]["edsl_handoff_rule"]
+    assert payload["data"]["managed_handoffs"]["intake"] == [
+        "niles intake export",
+        "run data.publish_command",
+        "niles intake register",
+        "run data.pull_command",
+        "niles intake import",
+        "niles intake review",
+    ]
     assert payload["next_steps"][0]["command"].startswith("niles contact add")
 
 
