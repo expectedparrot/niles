@@ -370,7 +370,7 @@ def test_status_report_synthesizes_pipeline_relationships_and_stalls(tmp_path):
     )[0] == 0
     assert run_niles(tmp_path, "contact", "add", "Krustylu Studios", "--tag", "lost")[0] == 0
     assert run_niles(tmp_path, "contact", "add", "Globex Corporation", "--trait", "stage=target", "--trait", "connector=Cookie")[0] == 0
-    assert run_niles(tmp_path, "contact", "add", "Unidentified Courthouse Lead")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Unidentified Courthouse Lead", "--tag", "prospect")[0] == 0
 
     report = tmp_path / "operating.html"
     assert run_niles(tmp_path, "report", "status", "--html", str(report))[0] == 0
@@ -404,6 +404,58 @@ def test_status_report_synthesizes_pipeline_relationships_and_stalls(tmp_path):
     assert "matching account" in html
     assert "data-stage=\"contracting\"" in html
     assert "querySelectorAll('table')" in html
+
+
+def test_report_entity_types_separate_pipeline_and_relationship_network(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Moe Szyslak", "--tag", "person")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Moe's Tavern", "--tag", "company", "--tag", "prospect")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Barney Gumble", "--company", "Moe's Tavern")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Mystery Record")[0] == 0
+
+    report = tmp_path / "entities.html"
+    assert run_niles(tmp_path, "report", "status", "--html", str(report))[0] == 0
+    html = report.read_text(encoding="utf-8")
+    active_pipeline = html.split("<h2>Active Pipeline</h2>", 1)[1].split("</section>", 1)[0]
+    relationship_network = html.split("<h2>Relationship Network</h2>", 1)[1].split("</section>", 1)[0]
+    assert "Moe&#x27;s Tavern" in active_pipeline
+    assert "Moe Szyslak" not in active_pipeline
+    assert "Mystery Record" not in active_pipeline
+    assert "Moe Szyslak" in relationship_network
+    assert "Unaffiliated" in relationship_network
+    assert "Barney Gumble" in relationship_network
+    assert "Mystery Record: entity type is ambiguous" in html
+
+
+def test_equal_timestamp_notes_use_append_sequence_for_current_status(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Burns Industries", "--tag", "prospect")[0] == 0
+    assert run_niles(tmp_path, "note", "add", "burns-industries", "Historical status", "--at", "2026-09-01")[0] == 0
+    assert run_niles(tmp_path, "note", "add", "burns-industries", "Newest same-day status", "--at", "2026-09-01")[0] == 0
+
+    notes = run_niles(tmp_path, "note", "list", "burns-industries")[1]["data"]["notes"]
+    assert [note["text"] for note in notes] == ["Newest same-day status", "Historical status"]
+    assert notes[0]["event_sequence"] > notes[1]["event_sequence"]
+
+    report = tmp_path / "before.html"
+    assert run_niles(tmp_path, "report", "status", "--html", str(report))[0] == 0
+    pipeline = report.read_text(encoding="utf-8").split("<h2>Active Pipeline</h2>", 1)[1].split("</section>", 1)[0]
+    assert "Newest same-day status" in pipeline
+    assert "Historical status" not in pipeline
+
+    assert run_niles(tmp_path, "rebuild-index")[0] == 0
+    rebuilt_notes = run_niles(tmp_path, "note", "list", "burns-industries")[1]["data"]["notes"]
+    assert [note["text"] for note in rebuilt_notes] == ["Newest same-day status", "Historical status"]
+
+    code, status_payload = run_niles(tmp_path, "contact", "status", "burns-industries", "Explicit override", "--at", "2026-09-01")
+    assert code == 0
+    assert status_payload["data"]["events_written"] == 2
+    assert status_payload["data"]["contact"]["traits"]["current_status"] == "Explicit override"
+    override = tmp_path / "override.html"
+    assert run_niles(tmp_path, "report", "status", "--html", str(override))[0] == 0
+    override_pipeline = override.read_text(encoding="utf-8").split("<h2>Active Pipeline</h2>", 1)[1].split("</section>", 1)[0]
+    assert "Explicit override" in override_pipeline
+    assert "Newest same-day status" not in override_pipeline
 
 
 def test_populated_hutz_law_example_generates_operating_report(tmp_path):

@@ -31,39 +31,39 @@ quiet_niles teammate add "Lionel Hutz" --alias lionel --role attorney
 quiet_niles teammate add "Cookie Kwan" --alias cookie --role referrals
 
 # Deals closest to revenue.
-quiet_niles contact add "Burns Industries" --tag prospect \
+quiet_niles contact add "Burns Industries" --tag company --tag prospect \
   --trait stage=contracting --trait priority=1 \
   --trait deal_value=120000 --trait expected_mrr=10000 --cadence-days 7
-quiet_niles contact add "Waylon Smithers" --company "Burns Industries" --role champion
+quiet_niles contact add "Waylon Smithers" --tag person --company "Burns Industries" --role champion
 quiet_niles note add burns-industries "Waiting on Mr. Burns to return the engagement letter." --kind meeting --at 2026-08-27
 quiet_niles task add burns-industries "Ask Smithers for signature timing" --assign lionel --due 2026-09-03 --tag contracting
 
-quiet_niles contact add "Globex Corporation" --tag prospect \
+quiet_niles contact add "Globex Corporation" --tag company --tag prospect \
   --trait stage=contracting --trait priority=1 \
   --trait deal_value=90000 --trait expected_mrr=7500 --cadence-days 7
-quiet_niles contact add "Hank Scorpio" --company "Globex Corporation" --role decision-maker
+quiet_niles contact add "Hank Scorpio" --tag person --company "Globex Corporation" --role decision-maker
 quiet_niles note add globex-corporation "Retainer terms agreed; signature is the remaining step." --kind call --at 2026-08-30
 quiet_niles task add globex-corporation "Send final retainer packet" --assign cookie --due 2026-09-04 --tag contracting
 
-quiet_niles contact add "Springfield Monorail Authority" --tag prospect \
+quiet_niles contact add "Springfield Monorail Authority" --tag company --tag prospect \
   --trait stage=pilot --trait priority=2 \
   --trait deal_value=60000 --trait expected_mrr=5000 --cadence-days 10
-quiet_niles contact add "Lyle Lanley" --company "Springfield Monorail Authority" --role champion
+quiet_niles contact add "Lyle Lanley" --tag person --company "Springfield Monorail Authority" --role champion
 quiet_niles note add springfield-monorail-authority "Negotiating an investigative review of the monorail contract." --kind meeting --at 2026-08-25
 quiet_niles task add springfield-monorail-authority "Return scoped investigation proposal" --assign lionel --due 2026-09-06 --tag pilot
 
 # A stalled dependency.
-quiet_niles contact add "The Leftorium" --tag prospect \
+quiet_niles contact add "The Leftorium" --tag company --tag prospect \
   --trait stage=stalled --trait priority=2 \
   --trait deal_value=36000 --trait expected_mrr=3000 --cadence-days 14
-quiet_niles contact add "Ned Flanders" --company "The Leftorium" --role owner
+quiet_niles contact add "Ned Flanders" --tag person --company "The Leftorium" --role owner
 quiet_niles note add the-leftorium "Waiting on the mall to approve a lease amendment." --kind call --at 2026-08-14
 quiet_niles task add the-leftorium "Draft a temporary kiosk workaround" --assign cookie --due 2026-09-05 --tag unblock
 
 # A warm-introduction target.
-quiet_niles contact add "Springfield Nuclear Power Plant" --tag target \
+quiet_niles contact add "Springfield Nuclear Power Plant" --tag company --tag target \
   --trait stage=target --trait priority=3 --trait connector=Smithers
-quiet_niles contact add "Waylon Smithers" --company "Springfield Nuclear Power Plant" --role introducer \
+quiet_niles contact add "Waylon Smithers" --tag person --company "Springfield Nuclear Power Plant" --role introducer \
   --email smithers@burns.example
 quiet_niles note add springfield-nuclear-power-plant "Smithers offered to make an introduction to the innovation team." --kind call --at 2026-08-21
 quiet_niles task add springfield-nuclear-power-plant "Send Smithers a forwardable introduction" --assign cookie --due 2026-09-07 --tag warm-intro
@@ -77,8 +77,8 @@ quiet_niles contact add "Shelbyville Nuclear" --tag lost --trait stage=lost
 quiet_niles contact add "Springfield Republican Party" --tag lost --trait stage=lost
 
 # Intentionally incomplete records exercise cleanup warnings.
-quiet_niles contact add "Olivia" --company "Unknown Springfield account"
-quiet_niles contact add "Blue-Haired Lawyer"
+quiet_niles contact add "Olivia" --tag person --company "Unknown Springfield account"
+quiet_niles contact add "Blue-Haired Lawyer" --tag person
 quiet_niles contact add "Unidentified courthouse lead" --tag prospect
 
 quiet_niles material add "Hutz Law engagement letter" \

@@ -109,6 +109,11 @@ the durable records are the events that created or changed them.
 ### Contacts
 
 A contact can represent a person or organization. Only `name` is required.
+Use a `person` tag for people and a `company`, `organization`, or `account` tag
+for organizations. The equivalent `entity_type` trait is useful during mapped
+imports. Reports honor explicit types first, then fall back to `company`,
+pipeline stage, and pipeline tags for legacy records. Ambiguous untyped records
+become cleanup warnings instead of presumed pipeline accounts.
 
 | Field | Meaning |
 |---|---|
@@ -139,6 +144,7 @@ Notes are interaction records attached to contacts.
 | `id` | Stable `note_` identifier |
 | `contact_id` | Owning contact |
 | `created_at` | Interaction timestamp |
+| `event_sequence` | Monotonic append order used to break timestamp ties |
 | `kind` | `note`, `call`, `meeting`, `email`, `intake`, `debrief`, or `enrichment` |
 | `text` | Note contents |
 | `source` | Provenance, such as `user` |
@@ -264,9 +270,12 @@ niles contact update krusty-burger \
 niles contact tag krusty-burger --add active-client --remove prospect
 niles contact archive krusty-burger --reason "Cease-and-desist received"
 niles contact merge waylon-smithers smithers --note "Duplicate from intake"
+niles contact status burns-industries "Waiting on signed engagement letter" --at 2026-09-02
 ```
 
 Merging moves notes and tasks to the kept contact and archives the duplicate.
+`contact status` records a dated status note and an explicit `current_status`;
+the explicit value takes precedence over inferred note text in reports.
 
 ## Notes and enrichment
 
@@ -382,7 +391,7 @@ niles export csv --tag prospect --output prospects.csv
 
 Recognized identity fields are `name`, `email` or `emails`, `company`, `role`,
 `tags`, and `cadence_days`. Operational mappings can promote spreadsheet data
-into `stage`, `priority`, `current_status`, `champion`, `connector`,
+into `entity_type`, `stage`, `priority`, `current_status`, `champion`, `connector`,
 `deal_value`, `expected_mrr`, `next_action`, `owner`, `due_date`, and
 `last_interaction`. A paired `material_title` and `material_url` creates a
 real material. Multiple emails and tags use semicolons. TOML maps external

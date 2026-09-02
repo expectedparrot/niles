@@ -182,6 +182,7 @@ niles contact show <ref> --with-notes [--with-tasks]
 niles contact list [--tag t] [--stale] [--json is the default; --human for tables]
 niles contact edit <ref> --set role="CTO" --trait timezone=ET
 niles contact update <ref> [--name n] [--company c] [--role r] [--trait k=v]
+niles contact status <ref> <status> [--at timestamp]
 niles contact tag <ref> [--add tag] [--remove tag]
 niles contact merge <ref-keep> <ref-dup>
 niles contact archive <ref> | niles contact delete <ref> --hard

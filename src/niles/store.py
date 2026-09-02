@@ -341,6 +341,7 @@ class Project:
               id text primary key,
               contact_id text not null,
               created_at text not null,
+              event_sequence integer not null default 0,
               kind text not null,
               text text not null,
               source text not null
@@ -423,6 +424,9 @@ class Project:
             );
             """
         )
+        note_columns = {row["name"] for row in conn.execute("pragma table_info(notes)").fetchall()}
+        if "event_sequence" not in note_columns:
+            conn.execute("alter table notes add column event_sequence integer not null default 0")
         conn.commit()
 
     def _refresh_search_index(self, conn: sqlite3.Connection) -> None:
@@ -714,13 +718,14 @@ class Project:
             conn.execute(
                 """
                 insert or replace into notes
-                  (id, contact_id, created_at, kind, text, source)
-                values (?, ?, ?, ?, ?, ?)
+                  (id, contact_id, created_at, event_sequence, kind, text, source)
+                values (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["id"],
                     payload["contact_id"],
                     payload["created_at"],
+                    event.get("sequence", 0),
                     payload["kind"],
                     payload["text"],
                     payload.get("source", "user"),
@@ -1066,6 +1071,19 @@ class Project:
         event = self.append_event("note_created", payload)
         return {"contact": contact, "note": payload, "events_written": 1, "event_id": event["event_id"]}
 
+    def set_contact_status(self, ref: str, status: str, at: str | None = None) -> dict[str, Any]:
+        if not status.strip():
+            raise NilesError("invalid_status", "Current status cannot be empty.")
+        contact = self.resolve_contact(ref)
+        note_result = self.add_note(contact["id"], status.strip(), "note", at)
+        update_result = self.update_contact(contact["id"], traits={"current_status": status.strip()})
+        return {
+            "contact": update_result["contact"],
+            "status_note": note_result["note"],
+            "events_written": 2,
+            "event_ids": [note_result["event_id"], update_result["event_id"]],
+        }
+
     def ingest_enrichment(
         self,
         ref: str,
@@ -1090,7 +1108,7 @@ class Project:
         query = (
             "select notes.*, contacts.name as contact_name from notes "
             "join contacts on notes.contact_id = contacts.id"
-            f"{where} order by notes.created_at desc"
+            f"{where} order by notes.created_at desc, notes.event_sequence desc, notes.id desc"
         )
         if limit:
             query += " limit ?"
@@ -1354,7 +1372,7 @@ class Project:
                 mapping = tomllib.load(handle).get("columns", {})
             allowed = {
                 "name", "email", "emails", "company", "role", "tags", "cadence_days",
-                "stage", "priority", "current_status", "champion", "connector",
+                "entity_type", "stage", "priority", "current_status", "champion", "connector",
                 "deal_value", "expected_mrr", "next_action", "owner", "due_date",
                 "last_interaction", "material_title", "material_url",
             }
@@ -1369,7 +1387,7 @@ class Project:
             if not (row.get("name") or "").strip():
                 raise NilesError("invalid_csv", f"Row {row_number} has no name.")
             traits: dict[str, Any] = {}
-            for field in ("stage", "priority", "current_status", "champion", "connector", "deal_value", "expected_mrr"):
+            for field in ("entity_type", "stage", "priority", "current_status", "champion", "connector", "deal_value", "expected_mrr"):
                 raw = (row.get(field) or "").strip()
                 if raw:
                     try:
@@ -1832,6 +1850,7 @@ class Project:
             "contact_id": row["contact_id"],
             "contact": row["contact_name"],
             "created_at": row["created_at"],
+            "event_sequence": row["event_sequence"],
             "kind": row["kind"],
             "text": row["text"],
             "source": row["source"],
@@ -1951,8 +1970,27 @@ def build_status_html(
         except (TypeError, ValueError):
             return 0
 
-    people = [contact for contact in contacts if contact.get("company")]
-    accounts = [contact for contact in contacts if not contact.get("company")]
+    def entity_type(contact: dict[str, Any]) -> str:
+        declared = str(contact.get("traits", {}).get("entity_type") or "").strip().lower()
+        tags = {str(tag).strip().lower() for tag in contact.get("tags", [])}
+        if declared in {"person", "individual"} or tags & {"person", "individual"}:
+            return "person"
+        if declared in {"organization", "organisation", "company", "account"} or tags & {"organization", "organisation", "company", "account"}:
+            return "organization"
+        if contact.get("company"):
+            return "person"
+        if contact_stage(contact) != "unspecified" or tags & {"prospect", "target", "lead", "customer", "client"}:
+            return "organization"
+        return "ambiguous"
+
+    people = [contact for contact in contacts if entity_type(contact) == "person"]
+    organizations = [contact for contact in contacts if entity_type(contact) == "organization"]
+    ambiguous_contacts = [contact for contact in contacts if entity_type(contact) == "ambiguous"]
+    accounts = [
+        contact for contact in organizations
+        if contact_stage(contact) != "unspecified"
+        or {str(tag).lower() for tag in contact.get("tags", [])} & {"prospect", "target", "lead", "customer", "client", "lost", "dead"}
+    ]
     people_by_company: dict[str, list[dict[str, Any]]] = {}
     for person in people:
         people_by_company.setdefault(str(person["company"]).casefold(), []).append(person)
@@ -1966,6 +2004,17 @@ def build_status_html(
             + (f" <span class=\"subtle\">{escape(person.get('role') or ', '.join(person.get('tags', [])) or 'role missing')}</span>" )
             for person in related
         )
+
+    network_rows = "\n".join(
+        "<tr>"
+        f"<td><strong>{escape(person['name'])}</strong></td>"
+        f"<td>{escape(person.get('company') or 'Unaffiliated')}</td>"
+        f"<td>{escape(person.get('role') or ', '.join(person.get('tags', [])) or 'Role missing')}</td>"
+        f"<td>{escape(date_label((latest_note(person) or {}).get('created_at')) or 'No dated interaction')}</td>"
+        f"<td>{escape((next_task(person) or {}).get('text') or 'No next action')}</td>"
+        "</tr>"
+        for person in sorted(people, key=lambda item: item["name"].lower())
+    ) or empty_row(5, "No people in the relationship network.")
 
     inactive_accounts = [account for account in accounts if contact_stage(account) in {"lost", "won"} or {"lost", "dead"} & {str(tag).lower() for tag in account.get("tags", [])}]
     active_accounts = [account for account in accounts if account not in inactive_accounts]
@@ -2062,6 +2111,8 @@ def build_status_html(
             warning_items.append(f"{person['name']}: relationship role missing")
         if len(person["name"].split()) == 1:
             warning_items.append(f"{person['name']}: possibly incomplete or ambiguous person name")
+    for contact in ambiguous_contacts:
+        warning_items.append(f"{contact['name']}: entity type is ambiguous; tag as person or company")
     warnings_html = "".join(f"<li>{escape(item)}</li>" for item in warning_items) or "<li>No structural warnings detected.</li>"
 
     history_blocks = "\n".join(
@@ -2233,6 +2284,11 @@ def build_status_html(
 
         <section class="section">
           <div class="section-head"><h2>Warm Introductions</h2><span class="section-note">Target accounts with an explicit connector</span></div><div class="table-wrap"><table><thead><tr><th>Target</th><th>Connector</th><th>Status</th><th>Next action</th></tr></thead><tbody>{warm_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Relationship Network</h2><span class="section-note">People are kept separate from pipeline accounts, including unaffiliated contacts</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Person</th><th>Organization</th><th>Relationship role</th><th>Latest interaction</th><th>Next action</th></tr></thead><tbody>{network_rows}</tbody></table></div>
         </section>
 
         <section class="grid-2 section">

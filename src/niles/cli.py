@@ -108,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     contact_merge.add_argument("keep")
     contact_merge.add_argument("duplicate")
     contact_merge.add_argument("--note")
+    contact_status = contact_sub.add_parser("status")
+    contact_status.add_argument("ref")
+    contact_status.add_argument("status")
+    contact_status.add_argument("--at")
 
     note = sub.add_parser("note")
     note_sub = note.add_subparsers(dest="note_command", required=True)
@@ -499,7 +503,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles rebuild-index",
                 "niles fsck",
                 "niles contact add/show/list",
-                "niles contact update/tag/archive/merge",
+                "niles contact update/tag/archive/merge/status",
                 "niles note add",
                 "niles note list",
                 "niles task add/list/done",
@@ -624,6 +628,8 @@ def dispatch_contact(project: Project, args: argparse.Namespace, argv: list[str]
         return ok("contact archive", argv, project.archive_contact(args.ref, reason=args.reason))
     if args.contact_command == "merge":
         return ok("contact merge", argv, project.merge_contacts(args.keep, args.duplicate, note=args.note))
+    if args.contact_command == "status":
+        return ok("contact status", argv, project.set_contact_status(args.ref, args.status, args.at))
     raise NilesError("unknown_command", "Unknown contact command.")
 
 
