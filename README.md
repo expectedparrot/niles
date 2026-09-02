@@ -345,7 +345,26 @@ niles history --contact burns-industries --limit 20
 niles report status --html hutz-status.html
 ```
 
-The HTML report escapes CRM content before rendering.
+The HTML report is an operating view, not a chronology dump. It leads with
+accounts closest to revenue, actions grouped by owner, stalled or waiting
+accounts, and an active pipeline with stage, priority, mapped people, latest
+interaction, current status, and next action. Won/lost/dead accounts and full
+history are collapsed. Missing stages, relationship roles, actions, owners,
+and due dates appear as explicit cleanup warnings. CRM content is escaped
+before rendering.
+
+For a fully populated fictional CRM, use the
+[Hutz Law operating-report example](examples/hutz-law-crm/README.md). It builds
+the project entirely through public commands and includes contracting deals,
+a pilot, a stalled account, a warm introduction, lost accounts, mapped people,
+commercial values, materials, and intentional cleanup warnings:
+
+```bash
+./examples/hutz-law-crm/populate.sh /tmp/hutz-law-demo
+```
+
+Open `/tmp/hutz-law-demo/crm-operating-report.html` to exercise its search,
+stage filter, sortable tables, and expandable relationship history.
 
 ## CSV and JSON exchange
 
@@ -359,14 +378,25 @@ niles export json --output contacts.json
 niles export csv --tag prospect --output prospects.csv
 ```
 
-Recognized fields are `name`, `email` or `emails`, `company`, `role`, and
-`tags`. Multiple emails and tags use semicolons. TOML maps external headers:
+Recognized identity fields are `name`, `email` or `emails`, `company`, `role`,
+`tags`, and `cadence_days`. Operational mappings can promote spreadsheet data
+into `stage`, `priority`, `current_status`, `champion`, `connector`,
+`deal_value`, `expected_mrr`, `next_action`, `owner`, `due_date`, and
+`last_interaction`. A paired `material_title` and `material_url` creates a
+real material. Multiple emails and tags use semicolons. TOML maps external
+headers:
 
 ```toml
 [columns]
 "Potential Plaintiff" = "name"
 "Last Known Employer" = "company"
 "Legal Emergency" = "tags"
+"Case Stage" = "stage"
+"Current Status" = "current_status"
+"Next Action" = "next_action"
+"Action Owner" = "owner"
+"Action Due" = "due_date"
+"Last Real Interaction" = "last_interaction"
 ```
 
 ```bash

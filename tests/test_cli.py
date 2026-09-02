@@ -321,11 +321,125 @@ def test_notes_contact_updates_tasks_and_report(tmp_path):
     html = report.read_text(encoding="utf-8")
     assert "E[&#x1f99c;] Expected Parrot" in html
     assert "Expected Parrot CRM Status" in html
-    assert "Next Actions" in html
+    assert "Actions Due This Week" in html
+    assert "Active Pipeline" in html
+    assert "Data quality and cleanup" in html
     assert "Send pricing deck" in html
     assert "Buyer FAQ" in html
     assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html
     assert "<script>alert('x')</script>" not in html
+
+
+def test_status_report_synthesizes_pipeline_relationships_and_stalls(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(
+        tmp_path,
+        "contact",
+        "add",
+        "Burns Industries",
+        "--trait",
+        "stage=contracting",
+        "--trait",
+        "priority=1",
+        "--trait",
+        "deal_value=120000",
+        "--trait",
+        "expected_mrr=10000",
+    )[0] == 0
+    assert run_niles(
+        tmp_path,
+        "contact",
+        "add",
+        "Waylon Smithers",
+        "--company",
+        "Burns Industries",
+        "--role",
+        "champion",
+    )[0] == 0
+    assert run_niles(tmp_path, "note", "add", "burns-industries", "Waiting on engagement letter", "--at", "2026-08-20")[0] == 0
+    assert run_niles(
+        tmp_path,
+        "task",
+        "add",
+        "burns-industries",
+        "Ask Smithers for signature timing",
+        "--assign",
+        "lionel",
+        "--due",
+        "2026-09-03",
+    )[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Krustylu Studios", "--tag", "lost")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Globex Corporation", "--trait", "stage=target", "--trait", "connector=Cookie")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Unidentified Courthouse Lead")[0] == 0
+
+    report = tmp_path / "operating.html"
+    assert run_niles(tmp_path, "report", "status", "--html", str(report))[0] == 0
+    html = report.read_text(encoding="utf-8")
+    assert "Closest to Revenue" in html
+    assert "Stalled or Waiting" in html
+    assert "Burns Industries" in html
+    assert "contracting" in html
+    assert "Waylon Smithers" in html
+    assert "champion" in html
+    assert "2026-08-20" in html
+    assert "Waiting on engagement letter" in html
+    assert "Ask Smithers for signature timing" in html
+    assert "Actions Due This Week" in html
+    assert "lionel" in html
+    assert "Won, Lost, and Dead Accounts" in html
+    assert "1 excluded from active pipeline" in html
+    assert "Unidentified Courthouse Lead: pipeline stage missing" in html
+    assert "Unidentified Courthouse Lead: next action missing" in html
+    assert "Commercial View" in html
+    assert "$120,000" in html
+    assert "$10,000" in html
+    assert "Warm Introductions" in html
+    assert "Globex Corporation" in html
+    assert "Cookie" in html
+    assert "Relationship History" in html
+    assert "<details>" in html
+    assert 'id="report-search"' in html
+    assert 'id="stage-filter"' in html
+    assert 'id="toggle-history"' in html
+    assert "matching account" in html
+    assert "data-stage=\"contracting\"" in html
+    assert "querySelectorAll('table')" in html
+
+
+def test_populated_hutz_law_example_generates_operating_report(tmp_path):
+    target = tmp_path / "hutz-law-demo"
+    result = subprocess.run(
+        [str(ROOT / "examples" / "hutz-law-crm" / "populate.sh"), str(target)],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src"), "NILES_PYTHON": sys.executable},
+    )
+    assert result.returncode == 0, result.stderr
+    report = target / "crm-operating-report.html"
+    assert report.is_file()
+    html = report.read_text(encoding="utf-8")
+    assert "Burns Industries" in html
+    assert "Globex Corporation" in html
+    assert "Springfield Monorail Authority" in html
+    assert "The Leftorium" in html
+    assert "$210,000" in html
+    assert "$60,000" in html
+    assert "Smithers" in html
+    assert "5 excluded from active pipeline" in html
+    assert 'id="report-search"' in html
+
+    repeated = subprocess.run(
+        [str(ROOT / "examples" / "hutz-law-crm" / "populate.sh"), str(target)],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src"), "NILES_PYTHON": sys.executable},
+    )
+    assert repeated.returncode == 2
+    assert "Refusing to overwrite" in repeated.stderr
 
 
 def test_org_material_enrichment_and_merge(tmp_path):
@@ -517,6 +631,36 @@ def test_csv_mapping_and_fts_search(tmp_path):
     assert code == 0
     assert payload["data"]["results"][0]["type"] == "contact"
     assert "rank" in payload["data"]["results"][0]
+
+
+def test_csv_mapping_promotes_operating_fields(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    source = tmp_path / "pipeline.csv"
+    source.write_text(
+        "Account,Stage,Priority,Status,Action,Owner,Due,Last Touch,Asset,Asset URL\n"
+        "Burns Industries,contracting,1,Waiting on signature,Ask Smithers for timing,lionel,2026-09-08,2026-08-20,Engagement Letter,https://example.invalid/engagement\n",
+        encoding="utf-8",
+    )
+    mapping = tmp_path / "pipeline.toml"
+    mapping.write_text(
+        '[columns]\nAccount = "name"\nStage = "stage"\nPriority = "priority"\n'
+        'Status = "current_status"\nAction = "next_action"\nOwner = "owner"\n'
+        'Due = "due_date"\n"Last Touch" = "last_interaction"\n'
+        'Asset = "material_title"\n"Asset URL" = "material_url"\n',
+        encoding="utf-8",
+    )
+    code, payload = run_niles(tmp_path, "import", "csv", str(source), "--mapping", str(mapping), "--commit")
+    assert code == 0
+    assert payload["data"]["events_written"] == 4
+    contact = run_niles(tmp_path, "contact", "show", "burns-industries", "--with-notes", "--with-tasks")[1]["data"]["contact"]
+    assert contact["traits"]["stage"] == "contracting"
+    assert contact["traits"]["priority"] == 1
+    assert contact["traits"]["current_status"] == "Waiting on signature"
+    assert contact["notes"][0]["created_at"].startswith("2026-08-20")
+    assert contact["tasks"][0]["text"] == "Ask Smithers for timing"
+    assert contact["tasks"][0]["assignee"] == "lionel"
+    assert contact["tasks"][0]["due_date"] == "2026-09-08"
+    assert run_niles(tmp_path, "material", "list")[1]["data"]["materials"][0]["title"] == "Engagement Letter"
 
 
 def test_survey_templates_copy_preview_apply_and_edsl_export(tmp_path):

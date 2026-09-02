@@ -13,7 +13,7 @@ import tomllib
 import zipfile
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1352,7 +1352,12 @@ class Project:
                 raise NilesError("mapping_not_found", f"Mapping file not found: {mapping_path}")
             with mapping_source.open("rb") as handle:
                 mapping = tomllib.load(handle).get("columns", {})
-            allowed = {"name", "email", "emails", "company", "role", "tags"}
+            allowed = {
+                "name", "email", "emails", "company", "role", "tags", "cadence_days",
+                "stage", "priority", "current_status", "champion", "connector",
+                "deal_value", "expected_mrr", "next_action", "owner", "due_date",
+                "last_interaction", "material_title", "material_url",
+            }
             if not mapping or any(field not in allowed for field in mapping.values()):
                 raise NilesError("invalid_mapping", "[columns] must map CSV columns to supported contact fields.")
             rows = [{mapping.get(key, key): value for key, value in row.items()} for row in rows]
@@ -1363,12 +1368,59 @@ class Project:
         for row_number, row in enumerate(rows, start=2):
             if not (row.get("name") or "").strip():
                 raise NilesError("invalid_csv", f"Row {row_number} has no name.")
-            preview.append({"name": row["name"].strip(), "emails": [v for v in (row.get("emails") or row.get("email") or "").split(";") if v], "company": row.get("company") or None, "role": row.get("role") or None, "tags": [v for v in (row.get("tags") or "").split(";") if v]})
+            traits: dict[str, Any] = {}
+            for field in ("stage", "priority", "current_status", "champion", "connector", "deal_value", "expected_mrr"):
+                raw = (row.get(field) or "").strip()
+                if raw:
+                    try:
+                        traits[field] = float(raw) if "." in raw else int(raw)
+                    except ValueError:
+                        traits[field] = raw
+            cadence_raw = (row.get("cadence_days") or "").strip()
+            try:
+                cadence_days = int(cadence_raw) if cadence_raw else None
+            except ValueError as exc:
+                raise NilesError("invalid_csv", f"Row {row_number} has an invalid cadence_days value.") from exc
+            item = {
+                "name": row["name"].strip(),
+                "emails": [v.strip() for v in (row.get("emails") or row.get("email") or "").split(";") if v.strip()],
+                "company": row.get("company") or None,
+                "role": row.get("role") or None,
+                "tags": [v.strip() for v in (row.get("tags") or "").split(";") if v.strip()],
+                "cadence_days": cadence_days,
+                "traits": traits,
+                "next_action": (row.get("next_action") or "").strip() or None,
+                "owner": (row.get("owner") or "").strip() or None,
+                "due_date": (row.get("due_date") or "").strip() or None,
+                "last_interaction": (row.get("last_interaction") or "").strip() or None,
+                "material_title": (row.get("material_title") or "").strip() or None,
+                "material_url": (row.get("material_url") or "").strip() or None,
+            }
+            if item["due_date"]:
+                try:
+                    date.fromisoformat(item["due_date"])
+                except ValueError as exc:
+                    raise NilesError("invalid_csv", f"Row {row_number} has an invalid due_date value.") from exc
+            if item["last_interaction"]:
+                parse_timestamp(item["last_interaction"])
+            if bool(item["material_title"]) != bool(item["material_url"]):
+                raise NilesError("invalid_csv", f"Row {row_number} must provide both material_title and material_url.")
+            preview.append(item)
         event_ids = []
         if commit:
             for item in preview:
-                result = self.add_contact(item["name"], item["emails"], [], item["company"], item["role"], {}, item["tags"], None)
+                result = self.add_contact(item["name"], item["emails"], [], item["company"], item["role"], item["traits"], item["tags"], item["cadence_days"])
                 event_ids.append(result["event_id"])
+                contact_id = result["contact"]["id"]
+                if item["last_interaction"] and item["traits"].get("current_status"):
+                    note_result = self.add_note(contact_id, str(item["traits"]["current_status"]), "note", item["last_interaction"])
+                    event_ids.append(note_result["event_id"])
+                if item["next_action"]:
+                    task_result = self.add_task(contact_id, item["next_action"], item["due_date"], item["owner"], ["imported"])
+                    event_ids.append(task_result["event_id"])
+                if item["material_url"]:
+                    material_result = self.add_material(item["material_title"], url=item["material_url"], tags=[slugify(item["name"]), "imported"])
+                    event_ids.append(material_result["event_id"])
         return {"path": str(source), "mapping": mapping, "dry_run": not commit, "count": len(preview), "contacts": preview, "events_written": len(event_ids), "event_ids": event_ids}
 
     def list_surveys(self) -> list[dict[str, Any]]:
@@ -1719,7 +1771,7 @@ class Project:
             out = self.root / out
         out.parent.mkdir(parents=True, exist_ok=True)
         contacts = self.list_contacts()
-        notes = self.list_notes(limit=50)
+        notes = self.list_notes()
         tasks = self.list_tasks(status="open")
         org = self.get_org_context()
         materials = self.list_materials()
@@ -1832,17 +1884,12 @@ def build_status_html(
     materials: list[dict[str, Any]],
 ) -> str:
     generated_at = utc_now()
-    visible_contacts = sorted(
-        contacts,
-        key=lambda contact: (
-            bool(contact.get("archived")),
-            priority_sort_key(contact.get("traits", {}).get("priority")),
-            contact["name"].lower(),
-        ),
-    )
     org_name = org.get("name") or project_name
     org_context = org.get("context") or "No organization context has been set."
     org_traits = org.get("traits") or {}
+    today = datetime.now(timezone.utc).date()
+    pipeline_stages = ("target", "engaged", "demo", "pilot", "contracting", "won", "stalled", "lost")
+    stage_rank = {stage: position for position, stage in enumerate(("contracting", "pilot", "demo", "engaged", "target", "stalled", "won", "lost"))}
 
     def date_label(value: str | None) -> str:
         if not value:
@@ -1866,36 +1913,164 @@ def build_status_html(
     def empty_row(columns: int, text: str) -> str:
         return f'<tr><td class="empty-cell" colspan="{columns}">{escape(text)}</td></tr>'
 
-    task_rows = "\n".join(
-        "<tr>"
-        f"<td>{escape(date_label(task.get('due_date')) or 'No due date')}</td>"
-        f"<td>{escape(task.get('assignee') or 'Unassigned')}</td>"
-        f"<td>{escape(task.get('contact') or 'No contact')}</td>"
-        f"<td><strong>{escape(task['text'])}</strong><div class=\"row-tags\">{tag_list(task.get('tags', []))}</div></td>"
-        "</tr>"
-        for task in tasks
-    ) or empty_row(4, "No open tasks.")
+    notes_by_contact: dict[str, list[dict[str, Any]]] = {}
+    tasks_by_contact: dict[str, list[dict[str, Any]]] = {}
+    for note in notes:
+        notes_by_contact.setdefault(note["contact_id"], []).append(note)
+    for task in tasks:
+        if task.get("contact_id"):
+            tasks_by_contact.setdefault(task["contact_id"], []).append(task)
 
-    contact_rows = "\n".join(
-        "<tr>"
-        f"<td><strong>{escape(contact['name'])}</strong><div class=\"subtle\">{escape(contact.get('company') or contact.get('role') or contact['slug'])}</div></td>"
-        f"<td>{tag_list(contact['tags'])}</td>"
-        f"<td>{badge(contact.get('traits', {}).get('priority'), 'priority')}</td>"
-        f"<td>{escape(date_label(contact.get('last_touched')) or 'No notes yet')}</td>"
-        f"<td>{badge('Archived' if contact.get('archived') else 'Active', 'state archived' if contact.get('archived') else 'state active')}</td>"
-        "</tr>"
-        for contact in visible_contacts
-    ) or empty_row(5, "No contacts yet.")
+    def contact_stage(contact: dict[str, Any]) -> str:
+        explicit = str(contact.get("traits", {}).get("stage") or "").strip().lower()
+        if explicit in pipeline_stages:
+            return explicit
+        tags = {str(tag).lower() for tag in contact.get("tags", [])}
+        return next((stage for stage in pipeline_stages if stage in tags), "unspecified")
 
-    note_rows = "\n".join(
+    def latest_note(contact: dict[str, Any]) -> dict[str, Any] | None:
+        contact_notes = notes_by_contact.get(contact["id"], [])
+        return contact_notes[0] if contact_notes else None
+
+    def next_task(contact: dict[str, Any]) -> dict[str, Any] | None:
+        contact_tasks = tasks_by_contact.get(contact["id"], [])
+        return contact_tasks[0] if contact_tasks else None
+
+    def overdue(task: dict[str, Any]) -> bool:
+        try:
+            return bool(task.get("due_date") and date.fromisoformat(task["due_date"]) < today)
+        except ValueError:
+            return False
+
+    def format_currency(value: float) -> str:
+        return "$0" if value == 0 else f"${value:,.0f}"
+
+    def numeric_trait(contact: dict[str, Any], field: str) -> float:
+        try:
+            return float(contact.get("traits", {}).get(field) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    people = [contact for contact in contacts if contact.get("company")]
+    accounts = [contact for contact in contacts if not contact.get("company")]
+    people_by_company: dict[str, list[dict[str, Any]]] = {}
+    for person in people:
+        people_by_company.setdefault(str(person["company"]).casefold(), []).append(person)
+
+    def relationship_people(account: dict[str, Any]) -> str:
+        related = people_by_company.get(account["name"].casefold(), [])
+        if not related:
+            return '<span class="muted">No mapped people</span>'
+        return "<br>".join(
+            f"<strong>{escape(person['name'])}</strong>"
+            + (f" <span class=\"subtle\">{escape(person.get('role') or ', '.join(person.get('tags', [])) or 'role missing')}</span>" )
+            for person in related
+        )
+
+    inactive_accounts = [account for account in accounts if contact_stage(account) in {"lost", "won"} or {"lost", "dead"} & {str(tag).lower() for tag in account.get("tags", [])}]
+    active_accounts = [account for account in accounts if account not in inactive_accounts]
+    active_accounts.sort(key=lambda account: (stage_rank.get(contact_stage(account), 99), priority_sort_key(account.get("traits", {}).get("priority")), account["name"].lower()))
+
+    def pipeline_row(account: dict[str, Any]) -> str:
+        note = latest_note(account)
+        task = next_task(account)
+        status = account.get("traits", {}).get("current_status") or (note.get("text") if note else "No status recorded")
+        search_text = " ".join(
+            str(value) for value in (
+                account["name"], contact_stage(account), status,
+                task.get("text") if task else "", task.get("assignee") if task else "",
+                " ".join(person["name"] for person in people_by_company.get(account["name"].casefold(), [])),
+            ) if value
+        ).lower()
+        return (
+            f'<tr class="pipeline-row" data-account="{escape(account["id"], quote=True)}" data-stage="{escape(contact_stage(account), quote=True)}" data-search="{escape(search_text, quote=True)}">'
+            f"<td><strong>{escape(account['name'])}</strong></td>"
+            f"<td>{badge(contact_stage(account), 'stage')}</td>"
+            f"<td>{badge(account.get('traits', {}).get('priority'), 'priority')}</td>"
+            f"<td>{relationship_people(account)}</td>"
+            f"<td>{escape(date_label(note.get('created_at')) if note else 'No dated interaction')}</td>"
+            f"<td>{escape(str(status))}</td>"
+            f"<td>{escape(task.get('text') if task else 'No next action')}<div class=\"subtle\">{escape(task.get('assignee') or 'Unassigned') if task else ''}{' · ' + escape(date_label(task.get('due_date')) or 'No due date') if task else ''}</div></td>"
+            "</tr>"
+        )
+
+    pipeline_rows = "\n".join(pipeline_row(account) for account in active_accounts) or empty_row(7, "No active accounts.")
+    inactive_rows = "\n".join(pipeline_row(account) for account in inactive_accounts) or empty_row(7, "No won, lost, or dead accounts.")
+    revenue_accounts = [account for account in active_accounts if contact_stage(account) in {"contracting", "pilot", "demo"}]
+    revenue_rows = "\n".join(pipeline_row(account) for account in revenue_accounts) or empty_row(7, "No accounts are explicitly staged as demo, pilot, or contracting.")
+    stalled_accounts = [
+        account for account in active_accounts
+        if contact_stage(account) == "stalled"
+        or "waiting" in str(account.get("traits", {}).get("current_status") or (latest_note(account) or {}).get("text") or "").lower()
+    ]
+    stalled_rows = "\n".join(pipeline_row(account) for account in stalled_accounts) or empty_row(7, "No explicitly stalled or waiting accounts.")
+    stage_metrics_rows = "\n".join(
         "<tr>"
-        f"<td>{escape(date_label(note['created_at']))}</td>"
-        f"<td>{escape(note.get('contact') or 'No contact')}</td>"
-        f"<td>{badge(note['kind'], 'kind')}</td>"
-        f"<td>{escape(note['text'])}</td>"
+        f"<td>{badge(stage, 'stage')}</td>"
+        f"<td>{len(stage_accounts)}</td>"
+        f"<td>{escape(format_currency(sum(numeric_trait(account, 'deal_value') for account in stage_accounts)))}</td>"
+        f"<td>{escape(format_currency(sum(numeric_trait(account, 'expected_mrr') for account in stage_accounts)))}</td>"
         "</tr>"
-        for note in notes
-    ) or empty_row(4, "No notes yet.")
+        for stage in pipeline_stages
+        if (stage_accounts := [account for account in accounts if contact_stage(account) == stage])
+    ) or empty_row(4, "No explicit pipeline stages or commercial values.")
+    warm_accounts = [account for account in active_accounts if contact_stage(account) == "target" and account.get("traits", {}).get("connector")]
+    warm_rows = "\n".join(
+        "<tr>"
+        f"<td><strong>{escape(account['name'])}</strong></td>"
+        f"<td>{escape(str(account.get('traits', {}).get('connector')))}</td>"
+        f"<td>{escape(str(account.get('traits', {}).get('current_status') or (latest_note(account) or {}).get('text') or 'No status recorded'))}</td>"
+        f"<td>{escape((next_task(account) or {}).get('text') or 'No next action')}</td>"
+        "</tr>"
+        for account in warm_accounts
+    ) or empty_row(4, "No target accounts have an explicit connector.")
+
+    owner_groups: dict[str, list[dict[str, Any]]] = {}
+    week_end = today + timedelta(days=7)
+    for task in tasks:
+        try:
+            due_this_week = bool(task.get("due_date") and date.fromisoformat(task["due_date"]) <= week_end)
+        except ValueError:
+            due_this_week = False
+        if due_this_week:
+            owner_groups.setdefault(task.get("assignee") or "Unassigned", []).append(task)
+    owner_sections = "\n".join(
+        f'<div class="owner-group" data-search="{escape((owner + " " + " ".join((task.get("text") or "") + " " + (task.get("contact") or "") for task in owner_tasks)).lower(), quote=True)}"><h3>{escape(owner)}</h3><ul>'
+        + "".join(
+            f'<li class="{("overdue" if overdue(task) else "")}"><strong>{escape(task["text"])}</strong> — {escape(task.get("contact") or "No contact")} <span class="subtle">{escape(date_label(task.get("due_date")) or "No due date")}</span></li>'
+            for task in owner_tasks
+        )
+        + "</ul></div>"
+        for owner, owner_tasks in sorted(owner_groups.items())
+    ) or '<p class="empty-cell">No actions are due in the next seven days. Add explicit due dates for actions currently stored only in notes.</p>'
+
+    warning_items: list[str] = []
+    for account in active_accounts:
+        stage = contact_stage(account)
+        task = next_task(account)
+        if stage == "unspecified":
+            warning_items.append(f"{account['name']}: pipeline stage missing")
+        if task is None:
+            warning_items.append(f"{account['name']}: next action missing")
+        elif not task.get("assignee") or not task.get("due_date"):
+            missing = "owner and due date" if not task.get("assignee") and not task.get("due_date") else ("owner" if not task.get("assignee") else "due date")
+            warning_items.append(f"{account['name']}: next action is missing {missing}")
+        if not people_by_company.get(account["name"].casefold()):
+            warning_items.append(f"{account['name']}: no people mapped to this account")
+    for person in people:
+        if not person.get("role"):
+            warning_items.append(f"{person['name']}: relationship role missing")
+        if len(person["name"].split()) == 1:
+            warning_items.append(f"{person['name']}: possibly incomplete or ambiguous person name")
+    warnings_html = "".join(f"<li>{escape(item)}</li>" for item in warning_items) or "<li>No structural warnings detected.</li>"
+
+    history_blocks = "\n".join(
+        f'<details><summary><strong>{escape(account["name"])}</strong> — {len(notes_by_contact.get(account["id"], []))} notes</summary><ol>'
+        + "".join(f'<li><span class="subtle">{escape(date_label(note["created_at"]))}</span> {escape(note["text"])}</li>' for note in notes_by_contact.get(account["id"], []))
+        + "</ol></details>"
+        for account in accounts
+        if notes_by_contact.get(account["id"])
+    ) or '<p class="empty-cell">No account history yet.</p>'
 
     material_rows = "\n".join(
         "<tr>"
@@ -1970,6 +2145,28 @@ def build_status_html(
       .kind {{ background: #f2f2f2; color: var(--ep-dark); }}
       .state.active {{ background: var(--ep-green-soft); color: var(--ep-green); }}
       .state.archived {{ background: #f2f2f2; color: var(--ep-gray); }}
+      .stage {{ text-transform: capitalize; }}
+      .owner-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }}
+      .owner-group {{ border: 1px solid var(--ep-border); border-radius: 8px; padding: 12px 14px; }}
+      .owner-group h3 {{ margin: 0 0 8px; color: var(--ep-green); }}
+      .owner-group ul, .warning-list {{ margin: 0; padding-left: 20px; }}
+      .owner-group li {{ margin: 7px 0; }}
+      .overdue {{ color: #9b2c24; }}
+      .warning-panel {{ background: #fff8e8; border-color: #e5c27a; }}
+      .report-controls {{ position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 0 0 24px; padding: 12px; background: rgba(255,255,255,.96); border: 1px solid var(--ep-border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.06); }}
+      .report-controls label {{ display: grid; gap: 3px; color: var(--ep-gray); font-size: .72rem; font-weight: 700; text-transform: uppercase; }}
+      .report-controls input, .report-controls select, .report-controls button {{ min-height: 36px; border: 1px solid var(--ep-border); border-radius: 5px; padding: 7px 9px; background: #fff; color: var(--ep-dark); font: inherit; }}
+      .report-controls input {{ min-width: min(320px, 70vw); }}
+      .report-controls button {{ cursor: pointer; font-weight: 700; }}
+      .report-controls button:hover {{ border-color: var(--ep-green); color: var(--ep-green); }}
+      .filter-count {{ margin-left: auto; color: var(--ep-gray); font-size: .78rem; }}
+      th.sortable {{ cursor: pointer; user-select: none; }}
+      th.sortable::after {{ content: " ↕"; color: #aaa; }}
+      th.sortable[data-direction="asc"]::after {{ content: " ↑"; color: var(--ep-green); }}
+      th.sortable[data-direction="desc"]::after {{ content: " ↓"; color: var(--ep-green); }}
+      .filtered-out {{ display: none !important; }}
+      details {{ border: 1px solid var(--ep-border); border-radius: 8px; margin: 8px 0; padding: 9px 12px; }}
+      summary {{ cursor: pointer; color: var(--ep-green); }}
       .row-tags {{ margin-top: 5px; }}
       .subtle {{ color: var(--ep-gray); font-size: 0.78rem; margin-top: 2px; }}
       .muted {{ color: var(--ep-gray); }}
@@ -1980,7 +2177,9 @@ def build_status_html(
         .brand-row, .section-head {{ align-items: flex-start; flex-direction: column; gap: 6px; }}
         .grid-2 {{ grid-template-columns: 1fr; }}
         h1 {{ font-size: 2.25rem; }}
+        .filter-count {{ width: 100%; margin-left: 0; }}
       }}
+      @media print {{ .report-controls {{ display: none; }} }}
     </style>
   </head>
   <body>
@@ -2001,35 +2200,115 @@ def build_status_html(
         </div>
       </header>
       <main>
+        <div class="report-controls" aria-label="Report filters">
+          <label>Search accounts, people, status, or actions<input id="report-search" type="search" placeholder="e.g. contract, Smithers, Robin"></label>
+          <label>Pipeline stage<select id="stage-filter"><option value="">All stages</option>{''.join(f'<option value="{stage}">{stage.title()}</option>' for stage in pipeline_stages)}<option value="unspecified">Unspecified</option></select></label>
+          <button id="reset-filters" type="button">Reset</button>
+          <button id="toggle-history" type="button">Expand history</button>
+          <span class="filter-count" id="filter-count" aria-live="polite"></span>
+        </div>
+        <section class="section">
+          <div class="section-head"><h2>Closest to Revenue</h2><span class="section-note">Accounts explicitly staged demo, pilot, or contracting</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Current status</th><th>Next action · owner · due</th></tr></thead><tbody>{revenue_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Actions Due This Week</h2><span class="section-note">Grouped by owner; overdue actions shown in red</span></div>
+          <div class="owner-grid">{owner_sections}</div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Stalled or Waiting</h2><span class="section-note">Explicitly stalled accounts and latest statuses containing “waiting”</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Current status</th><th>Next action · owner · due</th></tr></thead><tbody>{stalled_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Active Pipeline</h2><span class="section-note">Won, lost, and dead accounts excluded</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Current status</th><th>Next action · owner · due</th></tr></thead><tbody>{pipeline_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Commercial View</h2><span class="section-note">Explicit values only; no inferred forecast</span></div><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Accounts</th><th>Deal value</th><th>Expected MRR</th></tr></thead><tbody>{stage_metrics_rows}</tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Warm Introductions</h2><span class="section-note">Target accounts with an explicit connector</span></div><div class="table-wrap"><table><thead><tr><th>Target</th><th>Connector</th><th>Status</th><th>Next action</th></tr></thead><tbody>{warm_rows}</tbody></table></div>
+        </section>
+
         <section class="grid-2 section">
-          <div>
-            <div class="section-head"><h2>Next Actions</h2><span class="section-note">Open tasks sorted by due date</span></div>
-            <div class="table-wrap"><table><thead><tr><th>Due</th><th>Owner</th><th>Contact</th><th>Task</th></tr></thead><tbody>{task_rows}</tbody></table></div>
-          </div>
-          <aside class="panel">
-            <h3>Organization</h3>
-            <p>{escape(org_context)}</p>
-            {trait_block}
-          </aside>
+          <div class="panel warning-panel"><h3>Data quality and cleanup</h3><ul class="warning-list">{warnings_html}</ul></div>
+          <aside class="panel"><h3>Organization</h3><p>{escape(org_context)}</p>{trait_block}</aside>
         </section>
 
         <section class="section">
-          <div class="section-head"><h2>Contacts</h2><span class="section-note">Active contacts first, then archived records</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Name</th><th>Tags</th><th>Priority</th><th>Last Touched</th><th>State</th></tr></thead><tbody>{contact_rows}</tbody></table></div>
-        </section>
-
-        <section class="section">
-          <div class="section-head"><h2>Recent Notes</h2><span class="section-note">Latest 50 notes</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Date</th><th>Contact</th><th>Kind</th><th>Note</th></tr></thead><tbody>{note_rows}</tbody></table></div>
+          <details><summary><strong>Won, Lost, and Dead Accounts</strong> — {len(inactive_accounts)} excluded from active pipeline</summary>
+            <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Final status</th><th>Remaining action</th></tr></thead><tbody>{inactive_rows}</tbody></table></div>
+          </details>
         </section>
 
         <section class="section">
           <div class="section-head"><h2>Materials</h2><span class="section-note">Company context available to agents</span></div>
           <div class="table-wrap"><table><thead><tr><th>Title</th><th>Location</th><th>Tags</th><th>Added</th></tr></thead><tbody>{material_rows}</tbody></table></div>
         </section>
+
+        <section class="section history">
+          <div class="section-head"><h2>Relationship History</h2><span class="section-note">Collapsed by account; latest status is shown in the pipeline above</span></div>
+          {history_blocks}
+        </section>
       </main>
       <footer>Generated {escape(generated_at)} by niles &middot; Expected Parrot</footer>
     </div>
+    <script>
+      (() => {{
+        const search = document.querySelector('#report-search');
+        const stage = document.querySelector('#stage-filter');
+        const count = document.querySelector('#filter-count');
+        const rows = [...document.querySelectorAll('.pipeline-row')];
+        const ownerGroups = [...document.querySelectorAll('.owner-group')];
+        function filterReport() {{
+          const query = search.value.trim().toLowerCase();
+          const selectedStage = stage.value;
+          const visibleAccounts = new Set();
+          rows.forEach(row => {{
+            const show = (!query || row.dataset.search.includes(query)) && (!selectedStage || row.dataset.stage === selectedStage);
+            row.classList.toggle('filtered-out', !show);
+            if (show) visibleAccounts.add(row.dataset.account);
+          }});
+          ownerGroups.forEach(group => group.classList.toggle('filtered-out', Boolean(query) && !group.dataset.search.includes(query)));
+          count.textContent = `${{visibleAccounts.size}} matching account${{visibleAccounts.size === 1 ? '' : 's'}}`;
+        }}
+        search.addEventListener('input', filterReport);
+        stage.addEventListener('change', filterReport);
+        document.querySelector('#reset-filters').addEventListener('click', () => {{ search.value = ''; stage.value = ''; filterReport(); search.focus(); }});
+
+        let historyOpen = false;
+        const historyDetails = [...document.querySelectorAll('.history details')];
+        const historyButton = document.querySelector('#toggle-history');
+        historyButton.addEventListener('click', () => {{
+          historyOpen = !historyOpen;
+          historyDetails.forEach(detail => detail.open = historyOpen);
+          historyButton.textContent = historyOpen ? 'Collapse history' : 'Expand history';
+        }});
+
+        document.querySelectorAll('table').forEach(table => {{
+          const body = table.tBodies[0];
+          if (!body) return;
+          [...table.tHead.rows[0].cells].forEach((header, column) => {{
+            header.classList.add('sortable'); header.tabIndex = 0; header.setAttribute('role', 'button');
+            const sort = () => {{
+              const direction = header.dataset.direction === 'asc' ? 'desc' : 'asc';
+              [...header.parentElement.cells].forEach(cell => delete cell.dataset.direction);
+              header.dataset.direction = direction;
+              const factor = direction === 'asc' ? 1 : -1;
+              [...body.rows].sort((a, b) => a.cells[column].innerText.trim().localeCompare(b.cells[column].innerText.trim(), undefined, {{numeric:true}}) * factor).forEach(row => body.appendChild(row));
+            }};
+            header.addEventListener('click', sort);
+            header.addEventListener('keydown', event => {{ if (event.key === 'Enter' || event.key === ' ') {{ event.preventDefault(); sort(); }} }});
+          }});
+        }});
+        filterReport();
+      }})();
+    </script>
   </body>
 </html>
 """
