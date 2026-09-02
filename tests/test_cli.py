@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+
+from niles.store import Project, utc_now
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -366,3 +369,323 @@ def test_ambiguous_contact_ref_blocks_mutation(tmp_path):
     assert payload["status"] == "error"
     assert payload["errors"][0]["code"] == "ambiguous_reference"
     assert len(payload["data"]["candidates"]) == 2
+
+
+def test_history_and_compensating_undo_survive_rebuild(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    code, payload = run_niles(tmp_path, "contact", "add", "Acme Data")
+    contact_event = payload["data"]["event_id"]
+    code, payload = run_niles(tmp_path, "note", "add", "acme-data", "Intro call")
+    note_event = payload["data"]["event_id"]
+
+    code, payload = run_niles(tmp_path, "history", "--contact", "acme-data")
+    assert code == 0
+    assert [event["event_id"] for event in payload["data"]["events"]] == [note_event, contact_event]
+
+    code, payload = run_niles(tmp_path, "undo", note_event)
+    assert code == 0
+    assert payload["data"]["reverted_event_id"] == note_event
+    assert run_niles(tmp_path, "rebuild-index")[0] == 0
+    code, payload = run_niles(tmp_path, "note", "list", "acme-data")
+    assert payload["data"]["notes"] == []
+
+    code, payload = run_niles(tmp_path, "undo", note_event)
+    assert code == 1
+    assert payload["errors"][0]["code"] == "already_reverted"
+
+
+def test_search_contacts_notes_and_tasks(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Maya Chen", "--company", "Acme Analytics", "--trait", "timezone=ET")[0] == 0
+    assert run_niles(tmp_path, "note", "add", "maya-chen", "Discussed security review")[0] == 0
+    assert run_niles(tmp_path, "task", "add", "maya-chen", "Send procurement packet")[0] == 0
+
+    assert run_niles(tmp_path, "search", "Analytics")[1]["data"]["results"][0]["type"] == "contact"
+    assert run_niles(tmp_path, "search", "security review")[1]["data"]["results"][0]["type"] == "note"
+    assert run_niles(tmp_path, "search", "procurement")[1]["data"]["results"][0]["type"] == "task"
+
+
+def test_teammates_are_event_sourced_and_resolvable(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    code, payload = run_niles(tmp_path, "teammate", "add", "John Horton", "--alias", "john", "--alias", "JJH", "--email", "john@example.com", "--role", "Founder")
+    assert code == 0
+    teammate_id = payload["data"]["teammate"]["id"]
+    assert run_niles(tmp_path, "rebuild-index")[0] == 0
+
+    code, payload = run_niles(tmp_path, "teammate", "show", "JJH")
+    assert code == 0
+    assert payload["data"]["teammate"]["id"] == teammate_id
+    assert run_niles(tmp_path, "teammate", "list")[1]["data"]["teammates"][0]["role"] == "Founder"
+
+
+def test_csv_import_preview_commit_and_exports(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    source = tmp_path / "contacts.csv"
+    source.write_text("name,email,company,tags\nMaya Chen,maya@example.com,Acme,buyer;prospect\n", encoding="utf-8")
+
+    code, payload = run_niles(tmp_path, "import", "csv", str(source))
+    assert code == 0
+    assert payload["data"]["dry_run"] is True
+    assert run_niles(tmp_path, "status")[1]["data"]["contacts"] == 0
+
+    code, payload = run_niles(tmp_path, "import", "csv", str(source), "--commit")
+    assert code == 0
+    assert payload["data"]["events_written"] == 1
+
+    output = tmp_path / "export.csv"
+    code, payload = run_niles(tmp_path, "export", "csv", "--output", str(output), "--tag", "buyer")
+    assert code == 0
+    assert payload["data"]["count"] == 1
+    assert "maya@example.com" in output.read_text(encoding="utf-8")
+
+    code, payload = run_niles(tmp_path, "export", "json")
+    assert code == 0
+    assert "Maya Chen" in payload["data"]["content"]
+
+
+def test_csv_mapping_and_fts_search(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    source = tmp_path / "mapped.csv"
+    source.write_text("Full Name,Organization,Labels\nMaya Chen,Acme Analytics,buyer\n", encoding="utf-8")
+    mapping = tmp_path / "mapping.toml"
+    mapping.write_text('[columns]\n"Full Name" = "name"\nOrganization = "company"\nLabels = "tags"\n', encoding="utf-8")
+    code, payload = run_niles(tmp_path, "import", "csv", str(source), "--mapping", str(mapping), "--commit")
+    assert code == 0
+    assert payload["data"]["mapping"]["Full Name"] == "name"
+    code, payload = run_niles(tmp_path, "search", "Acme Analytics")
+    assert code == 0
+    assert payload["data"]["results"][0]["type"] == "contact"
+    assert "rank" in payload["data"]["results"][0]
+
+
+def test_survey_templates_copy_preview_apply_and_edsl_export(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Maya Chen")[0] == 0
+    code, payload = run_niles(tmp_path, "survey", "list")
+    assert code == 0
+    assert {item["name"] for item in payload["data"]["surveys"]} == {"debrief", "review", "intake-basic"}
+
+    code, payload = run_niles(tmp_path, "survey", "copy", "debrief", "sales-debrief")
+    assert code == 0
+    assert payload["data"]["survey"]["template"] is False
+    answers = tmp_path / "answers.json"
+    answers.write_text(json.dumps({"summary": "Strong discovery call", "sentiment": "positive", "next_step": "Send proposal", "next_by": "2026-09-10", "owner": "john"}), encoding="utf-8")
+
+    code, payload = run_niles(tmp_path, "survey", "run", "sales-debrief", "--contact", "maya-chen", "--answers", str(answers), "--dry-run")
+    assert code == 0
+    assert payload["data"]["events_written"] == 0
+    assert run_niles(tmp_path, "note", "list", "maya-chen")[1]["data"]["notes"] == []
+
+    code, payload = run_niles(tmp_path, "survey", "run", "sales-debrief", "--contact", "maya-chen", "--answers", str(answers))
+    assert code == 0
+    assert payload["data"]["events_written"] == 3
+    assert run_niles(tmp_path, "contact", "show", "maya-chen")[1]["data"]["contact"]["traits"]["last_sentiment"] == "positive"
+    task = run_niles(tmp_path, "task", "list")[1]["data"]["tasks"][0]
+    assert task["due_date"] == "2026-09-10"
+    assert task["assignee"] == "john"
+
+    export = tmp_path / "debrief-edsl.json"
+    code, payload = run_niles(tmp_path, "survey", "export-edsl", "sales-debrief", "--output", str(export))
+    if importlib.util.find_spec("edsl"):
+        assert code == 0
+        bundle = json.loads(export.read_text(encoding="utf-8"))
+        assert bundle["schema_version"] == "niles.edsl-handoff.v1"
+        assert bundle["network"] is False
+    else:
+        assert code == 1
+        assert payload["errors"][0]["code"] == "edsl_not_installed"
+
+
+def register_form(tmp_path, kind, survey_name, contact_id=None):
+    project = Project.open(tmp_path)
+    payload = {
+        "id": f"form_{kind.replace('-', '_')}",
+        "kind": kind,
+        "survey_name": survey_name,
+        "remote_uuid": f"remote-{kind}",
+        "respondent_url": "https://example.test/respond",
+        "admin_url": "https://example.test/admin",
+        "contact_id": contact_id,
+        "recipient": "robin",
+        "created_at": utc_now(),
+    }
+    project.append_event("form_published", payload)
+    return payload["id"]
+
+
+def test_intake_pull_is_quarantined_deduplicated_and_reviewed(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    form_id = register_form(tmp_path, "intake", "intake-basic")
+    responses = tmp_path / "responses.json"
+    responses.write_text(json.dumps({"data": [{"id": "response-1", "answer": {"name": "Maya Chen", "email": "maya@example.com", "company": "Acme", "message": "Interested in a demo"}}]}), encoding="utf-8")
+
+    code, payload = run_niles(tmp_path, "intake", "pull", form_id, "--from-file", str(responses))
+    assert code == 0
+    assert payload["data"]["received"] == 1
+    assert payload["data"]["quarantined"] is True
+    assert run_niles(tmp_path, "status")[1]["data"]["contacts"] == 0
+    assert run_niles(tmp_path, "intake", "pull", form_id, "--from-file", str(responses))[1]["data"]["skipped"] == 1
+
+    submission = run_niles(tmp_path, "intake", "review")[1]["data"]["pending"][0]
+    code, payload = run_niles(tmp_path, "intake", "review", submission["id"], "--accept")
+    assert code == 0
+    assert payload["data"]["status"] == "accepted"
+    assert run_niles(tmp_path, "contact", "show", "maya@example.com", "--with-notes")[1]["data"]["contact"]["notes"][0]["kind"] == "intake"
+    assert run_niles(tmp_path, "fsck")[0] == 0
+
+
+def test_status_request_submission_routes_only_after_acceptance(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    contact = run_niles(tmp_path, "contact", "add", "Maya Chen")[1]["data"]["contact"]
+    form_id = register_form(tmp_path, "status-request", "debrief", contact["id"])
+    responses = tmp_path / "status.json"
+    responses.write_text(json.dumps({"responses": [{"response_id": "status-1", "answers": {"summary": "Renewal conversation", "sentiment": "positive", "next_step": "Send renewal", "next_by": "2026-09-12", "owner": "robin"}}]}), encoding="utf-8")
+    assert run_niles(tmp_path, "status-request", "pull", form_id, "--from-file", str(responses))[0] == 0
+    assert run_niles(tmp_path, "note", "list", "maya-chen")[1]["data"]["notes"] == []
+    submission_id = run_niles(tmp_path, "status-request", "review")[1]["data"]["pending"][0]["id"]
+    assert run_niles(tmp_path, "status-request", "review", submission_id, "--accept")[0] == 0
+    assert run_niles(tmp_path, "note", "list", "maya-chen")[1]["data"]["notes"][0]["text"] == "Renewal conversation"
+
+
+def test_recommendation_import_review_accept_and_reject(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    contact = run_niles(tmp_path, "contact", "add", "Maya Chen", "--tag", "prospect")[1]["data"]["contact"]
+    results = tmp_path / "recommendations.json"
+    results.write_text(json.dumps({"data": [{"scenario": {"contact_id": contact["id"]}, "answer": {"recommended_task": "Send the security brief", "rationale": "They are waiting on security."}}, {"scenario": {"contact_id": contact["id"]}, "answer": {"recommended_task": "Schedule executive call", "rationale": "Build sponsorship."}}]}), encoding="utf-8")
+    code, payload = run_niles(tmp_path, "recommend", "import", str(results))
+    assert code == 0
+    assert payload["data"]["quarantined"] is True
+    pending = run_niles(tmp_path, "recommend", "review")[1]["data"]["pending"]
+    assert len(pending) == 2
+    assert run_niles(tmp_path, "recommend", "accept", pending[0]["id"], "--assign", "john", "--due", "2026-09-15")[0] == 0
+    assert run_niles(tmp_path, "recommend", "reject", pending[1]["id"])[0] == 0
+    tasks = run_niles(tmp_path, "task", "list")[1]["data"]["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["tags"] == ["recommendation"]
+    assert run_niles(tmp_path, "fsck")[0] == 0
+
+    if importlib.util.find_spec("edsl"):
+        job_path = tmp_path / "next-steps.ep"
+        code, payload = run_niles(tmp_path, "recommend", "export", "next-steps", "--tag", "prospect", "--output", str(job_path))
+        assert code == 0
+        assert payload["data"]["contacts"] == 1
+        from edsl import Jobs
+
+        assert len(Jobs.load(str(job_path)).scenarios) == 1
+
+
+def test_network_publish_requires_explicit_ep_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXPECTED_PARROT_API_KEY", raising=False)
+    assert run_niles(tmp_path, "init")[0] == 0
+    code, payload = run_niles(tmp_path, "intake", "publish", "intake-basic")
+    assert code == 1
+    assert payload["errors"][0]["code"] == "missing_ep_api_key"
+
+
+def test_survey_run_validation_and_additional_routes(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Maya Chen")[0] == 0
+
+    code, payload = run_niles(tmp_path, "survey", "run", "debrief")
+    assert code == 0
+    assert payload["data"]["requires_answers"] is True
+
+    missing_file = run_niles(tmp_path, "survey", "run", "debrief", "--answers", "missing.json")[1]
+    assert missing_file["errors"][0]["code"] == "answers_not_found"
+    answers = tmp_path / "answers.json"
+    answers.write_text(json.dumps({"unknown": "value"}), encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "run", "debrief", "--answers", str(answers))[1]["errors"][0]["code"] == "unknown_answers"
+    answers.write_text(json.dumps({"sentiment": "excellent"}), encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "run", "debrief", "--answers", str(answers))[1]["errors"][0]["code"] == "missing_answers"
+    answers.write_text(json.dumps({"summary": "Call", "sentiment": "excellent"}), encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "run", "debrief", "--answers", str(answers))[1]["errors"][0]["code"] == "invalid_answers"
+    answers.write_text(json.dumps({"summary": "Call"}), encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "run", "debrief", "--answers", str(answers))[1]["errors"][0]["code"] == "contact_required"
+
+    routed = {
+        "schema_version": "niles.survey.v1",
+        "name": "routed",
+        "version": 1,
+        "questions": [
+            {"name": "company", "text": "Company", "type": "text"},
+            {"name": "tag", "text": "Tag", "type": "text"},
+            {"name": "archive", "text": "Archive", "type": "text"},
+        ],
+        "routes": {
+            "company": {"action": "set_field", "field": "company"},
+            "tag": {"action": "add_tag"},
+            "archive": {"action": "archive"},
+        },
+    }
+    (tmp_path / ".niles" / "surveys" / "routed.json").write_text(json.dumps(routed), encoding="utf-8")
+    answers.write_text(json.dumps({"company": "Acme", "tag": "buyer"}), encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "run", "routed", "--contact", "maya-chen", "--answers", str(answers))[0] == 0
+    contact = run_niles(tmp_path, "contact", "show", "maya-chen")[1]["data"]["contact"]
+    assert contact["company"] == "Acme"
+    assert contact["tags"] == ["buyer"]
+    answers.write_text(json.dumps({"archive": "yes"}), encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "run", "routed", "--contact", "maya-chen", "--answers", str(answers))[0] == 0
+
+
+def test_invalid_survey_files_csv_and_duplicate_copy(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    surveys = tmp_path / ".niles" / "surveys"
+    (surveys / "broken.json").write_text("{bad", encoding="utf-8")
+    assert run_niles(tmp_path, "survey", "show", "broken")[1]["errors"][0]["code"] == "invalid_survey_json"
+    assert run_niles(tmp_path, "survey", "show", "missing")[1]["errors"][0]["code"] == "unknown_survey"
+    assert run_niles(tmp_path, "survey", "copy", "debrief", "copy")[0] == 0
+    assert run_niles(tmp_path, "survey", "copy", "debrief", "copy")[1]["errors"][0]["code"] == "survey_exists"
+
+    assert run_niles(tmp_path, "import", "csv", "missing.csv")[1]["errors"][0]["code"] == "import_not_found"
+    csv_path = tmp_path / "bad.csv"
+    csv_path.write_text("company\nAcme\n", encoding="utf-8")
+    assert run_niles(tmp_path, "import", "csv", str(csv_path))[1]["errors"][0]["code"] == "invalid_csv"
+    csv_path.write_text("name\n\n", encoding="utf-8")
+    assert run_niles(tmp_path, "import", "csv", str(csv_path))[1]["errors"][0]["code"] == "invalid_csv"
+    assert run_niles(tmp_path, "import", "csv", str(csv_path), "--mapping", "missing.toml")[1]["errors"][0]["code"] == "mapping_not_found"
+    mapping = tmp_path / "bad.toml"
+    mapping.write_text('[columns]\nname = "password"\n', encoding="utf-8")
+    csv_path.write_text("name\nMaya\n", encoding="utf-8")
+    assert run_niles(tmp_path, "import", "csv", str(csv_path), "--mapping", str(mapping))[1]["errors"][0]["code"] == "invalid_mapping"
+
+
+def test_intake_merge_reject_close_and_review_guards(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Existing Maya", "--email", "maya@example.com")[0] == 0
+    form_id = register_form(tmp_path, "intake", "intake-basic")
+    responses = tmp_path / "responses.json"
+    responses.write_text(json.dumps({"data": [
+        {"id": "merge", "answer": {"name": "Maya", "email": "maya@example.com", "message": "Merge me"}},
+        {"id": "reject", "answer": {"name": "Spam", "email": "spam@example.com"}},
+    ]}), encoding="utf-8")
+    assert run_niles(tmp_path, "intake", "pull", form_id, "--from-file", str(responses))[0] == 0
+    pending = run_niles(tmp_path, "intake", "review")[1]["data"]["pending"]
+    assert run_niles(tmp_path, "intake", "review", pending[0]["id"])[1]["errors"][0]["code"] == "decision_required"
+    merge = next(item for item in pending if item["remote_id"] == "merge")
+    reject = next(item for item in pending if item["remote_id"] == "reject")
+    assert run_niles(tmp_path, "intake", "review", merge["id"], "--merge", "existing-maya")[1]["data"]["status"] == "merged"
+    assert run_niles(tmp_path, "intake", "review", reject["id"], "--reject")[1]["data"]["status"] == "rejected"
+    assert run_niles(tmp_path, "intake", "review", reject["id"], "--reject")[1]["errors"][0]["code"] == "submission_reviewed"
+    close = run_niles(tmp_path, "intake", "close", form_id)[1]
+    assert close["data"]["remote_closed"] is False
+
+
+def test_undo_and_recommendation_review_guards(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    contact_payload = run_niles(tmp_path, "contact", "add", "Maya Chen")[1]
+    contact_event = contact_payload["data"]["event_id"]
+    assert run_niles(tmp_path, "note", "add", "maya-chen", "Call")[0] == 0
+    assert run_niles(tmp_path, "undo", contact_event)[1]["errors"][0]["code"] == "undo_has_dependents"
+    assert run_niles(tmp_path, "undo", "missing")[1]["errors"][0]["code"] == "unknown_event"
+
+    bad = tmp_path / "bad-results.json"
+    bad.write_text("{bad", encoding="utf-8")
+    assert run_niles(tmp_path, "recommend", "import", str(bad))[1]["errors"][0]["code"] == "invalid_recommendation_results"
+    assert run_niles(tmp_path, "recommend", "accept", "missing")[1]["errors"][0]["code"] == "unknown_recommendation"
+
+    results = tmp_path / "results.json"
+    contact_id = contact_payload["data"]["contact"]["id"]
+    results.write_text(json.dumps({"data": [{"scenario": {"contact_id": contact_id}, "answer": {"recommended_task": "Follow up"}}]}), encoding="utf-8")
+    recommendation_id = run_niles(tmp_path, "recommend", "import", str(results))[1]["data"]["recommendation_ids"][0]
+    assert run_niles(tmp_path, "recommend", "reject", recommendation_id)[0] == 0
+    assert run_niles(tmp_path, "recommend", "reject", recommendation_id)[1]["errors"][0]["code"] == "recommendation_reviewed"

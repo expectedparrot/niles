@@ -44,10 +44,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("rebuild-index")
     sub.add_parser("fsck")
     export_parser = sub.add_parser("export")
-    export_parser.add_argument("archive")
+    export_parser.add_argument("target")
+    export_parser.add_argument("--output")
+    export_parser.add_argument("--tag")
     import_parser = sub.add_parser("import")
-    import_parser.add_argument("archive")
+    import_parser.add_argument("target")
+    import_parser.add_argument("path", nargs="?")
     import_parser.add_argument("--replace", action="store_true")
+    import_parser.add_argument("--commit", action="store_true")
+    import_parser.add_argument("--mapping")
+
+    history = sub.add_parser("history")
+    history.add_argument("--contact")
+    history.add_argument("--limit", type=int)
+    undo = sub.add_parser("undo")
+    undo.add_argument("event_id")
+    search = sub.add_parser("search")
+    search.add_argument("terms", nargs="+")
 
     agent = sub.add_parser("agent")
     agent_sub = agent.add_subparsers(dest="agent_command", required=True)
@@ -162,6 +175,86 @@ def build_parser() -> argparse.ArgumentParser:
     material_list = material_sub.add_parser("list")
     material_list.add_argument("--tag")
 
+    teammate = sub.add_parser("teammate")
+    teammate_sub = teammate.add_subparsers(dest="teammate_command", required=True)
+    teammate_add = teammate_sub.add_parser("add")
+    teammate_add.add_argument("name")
+    teammate_add.add_argument("--alias", action="append", default=[])
+    teammate_add.add_argument("--email")
+    teammate_add.add_argument("--role")
+    teammate_sub.add_parser("list")
+    teammate_show = teammate_sub.add_parser("show")
+    teammate_show.add_argument("ref")
+
+    survey = sub.add_parser("survey")
+    survey_sub = survey.add_subparsers(dest="survey_command", required=True)
+    survey_sub.add_parser("list")
+    survey_show = survey_sub.add_parser("show")
+    survey_show.add_argument("name")
+    survey_copy = survey_sub.add_parser("copy")
+    survey_copy.add_argument("source")
+    survey_copy.add_argument("destination")
+    survey_export = survey_sub.add_parser("export-edsl")
+    survey_export.add_argument("name")
+    survey_export.add_argument("--output", required=True)
+    survey_run = survey_sub.add_parser("run")
+    survey_run.add_argument("name")
+    survey_run.add_argument("--contact")
+    survey_run.add_argument("--answers")
+    survey_run.add_argument("--dry-run", action="store_true")
+    survey_run.add_argument("--no-input", action="store_true")
+
+    intake = sub.add_parser("intake")
+    intake_sub = intake.add_subparsers(dest="intake_command", required=True)
+    intake_publish = intake_sub.add_parser("publish")
+    intake_publish.add_argument("survey")
+    intake_pull = intake_sub.add_parser("pull")
+    intake_pull.add_argument("form_id")
+    intake_pull.add_argument("--from-file")
+    intake_sub.add_parser("status")
+    intake_close = intake_sub.add_parser("close")
+    intake_close.add_argument("form_id")
+    intake_review = intake_sub.add_parser("review")
+    intake_review.add_argument("submission_id", nargs="?")
+    intake_decision = intake_review.add_mutually_exclusive_group()
+    intake_decision.add_argument("--accept", action="store_true")
+    intake_decision.add_argument("--reject", action="store_true")
+    intake_decision.add_argument("--merge")
+    intake_review.add_argument("--note")
+
+    status_request = sub.add_parser("status-request")
+    status_sub = status_request.add_subparsers(dest="status_request_command", required=True)
+    status_publish = status_sub.add_parser("publish")
+    status_publish.add_argument("survey")
+    status_publish.add_argument("--contact", required=True)
+    status_publish.add_argument("--recipient", required=True)
+    status_pull = status_sub.add_parser("pull")
+    status_pull.add_argument("form_id")
+    status_pull.add_argument("--from-file")
+    status_sub.add_parser("status")
+    status_review = status_sub.add_parser("review")
+    status_review.add_argument("submission_id", nargs="?")
+    status_decision = status_review.add_mutually_exclusive_group()
+    status_decision.add_argument("--accept", action="store_true")
+    status_decision.add_argument("--reject", action="store_true")
+    status_review.add_argument("--note")
+
+    recommend = sub.add_parser("recommend")
+    recommend_sub = recommend.add_subparsers(dest="recommend_command", required=True)
+    recommend_export = recommend_sub.add_parser("export")
+    recommend_export.add_argument("name")
+    recommend_export.add_argument("--tag")
+    recommend_export.add_argument("--output", required=True)
+    recommend_import = recommend_sub.add_parser("import")
+    recommend_import.add_argument("path")
+    recommend_sub.add_parser("review")
+    recommend_accept = recommend_sub.add_parser("accept")
+    recommend_accept.add_argument("recommendation_id")
+    recommend_accept.add_argument("--assign")
+    recommend_accept.add_argument("--due")
+    recommend_reject = recommend_sub.add_parser("reject")
+    recommend_reject.add_argument("recommendation_id")
+
     report = sub.add_parser("report")
     report_sub = report.add_subparsers(dest="report_command", required=True)
     report_status = report_sub.add_parser("status")
@@ -226,8 +319,8 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
         )
     if args.command == "agent":
         return dispatch_agent(args, argv)
-    if args.command == "import":
-        data = Project.import_archive(Path.cwd(), Path(args.archive), replace=args.replace)
+    if args.command == "import" and args.target != "csv":
+        data = Project.import_archive(Path.cwd(), Path(args.target), replace=args.replace)
         return ok(
             "import",
             argv,
@@ -268,7 +361,9 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
             )
         return ok("fsck", argv, data, warnings=data["warnings"])
     if args.command == "export":
-        data = project.export_archive(Path(args.archive))
+        if args.target in {"csv", "json"}:
+            return ok(f"export {args.target}", argv, project.export_contacts(args.target, Path(args.output) if args.output else None, tag=args.tag))
+        data = project.export_archive(Path(args.target))
         return ok(
             "export",
             argv,
@@ -295,6 +390,24 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 )
             ],
         )
+    if args.command == "history":
+        return ok("history", argv, {"events": project.history(args.contact, args.limit)})
+    if args.command == "undo":
+        return ok("undo", argv, project.undo(args.event_id))
+    if args.command == "search":
+        return ok("search", argv, {"results": project.search(" ".join(args.terms))})
+    if args.command == "import":
+        if not args.path:
+            raise NilesError("missing_import_path", "CSV import requires a path.")
+        return ok(
+            "import csv",
+            argv,
+            project.import_csv(
+                Path(args.path),
+                commit=args.commit,
+                mapping_path=Path(args.mapping) if args.mapping else None,
+            ),
+        )
     if args.command == "contact":
         return dispatch_contact(project, args, argv)
     if args.command == "note":
@@ -305,6 +418,16 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
         return dispatch_org(project, args, argv)
     if args.command == "material":
         return dispatch_material(project, args, argv)
+    if args.command == "teammate":
+        return dispatch_teammate(project, args, argv)
+    if args.command == "survey":
+        return dispatch_survey(project, args, argv)
+    if args.command == "intake":
+        return dispatch_intake(project, args, argv)
+    if args.command == "status-request":
+        return dispatch_status_request(project, args, argv)
+    if args.command == "recommend":
+        return dispatch_recommend(project, args, argv)
     if args.command == "report":
         return dispatch_report(project, args, argv)
     if args.command == "enrich":
@@ -375,17 +498,22 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles task update/reassign/cancel/suggest",
                 "niles org context set/show",
                 "niles material add/list",
+                "niles teammate add/list/show",
+                "niles search",
+                "niles history/undo",
+                "niles import csv --commit",
+                "niles export csv|json",
+                "niles survey list/show/copy/run/export-edsl",
+                "niles intake publish/pull/status/close/review",
+                "niles status-request publish/pull/status/review",
+                "niles recommend export/import/review/accept/reject",
                 "niles report status --html <path>",
                 "niles enrich ingest",
                 "niles export",
                 "niles import",
                 "niles agent next",
             ],
-            "planned_edsl_handoff": [
-                "niles status-request export/import",
-                "niles recommend export/import/accept",
-                "niles intake publish/pull/review",
-            ],
+            "edsl_handoff_rule": "Niles publishes or exports, EP collects or runs, and reviewed imports are the only path to CRM mutation.",
         },
         next_steps=next_steps,
     )
@@ -565,6 +693,90 @@ def dispatch_material(project: Project, args: argparse.Namespace, argv: list[str
     raise NilesError("unknown_command", "Unknown material command.")
 
 
+def dispatch_teammate(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.teammate_command == "add":
+        return ok("teammate add", argv, project.add_teammate(args.name, args.alias, args.email, args.role))
+    if args.teammate_command == "list":
+        return ok("teammate list", argv, {"teammates": project.list_teammates()})
+    if args.teammate_command == "show":
+        return ok("teammate show", argv, {"teammate": project.resolve_teammate(args.ref)})
+    raise NilesError("unknown_command", "Unknown teammate command.")
+
+
+def dispatch_survey(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.survey_command == "list":
+        return ok("survey list", argv, {"surveys": project.list_surveys()})
+    if args.survey_command == "show":
+        return ok("survey show", argv, {"survey": project.get_survey(args.name)})
+    if args.survey_command == "copy":
+        return ok("survey copy", argv, project.copy_survey(args.source, args.destination))
+    if args.survey_command == "export-edsl":
+        return ok("survey export-edsl", argv, project.export_survey_edsl(args.name, Path(args.output)))
+    if args.survey_command == "run":
+        answers = None
+        if args.answers:
+            from .surveys import loads_answers
+
+            answer_path = Path(args.answers)
+            if not answer_path.is_absolute():
+                answer_path = project.root / answer_path
+            if not answer_path.is_file():
+                raise NilesError("answers_not_found", f"Answers file not found: {args.answers}")
+            answers = loads_answers(answer_path.read_text(encoding="utf-8"))
+        return ok("survey run", argv, project.run_survey(args.name, args.contact, answers, args.dry_run))
+    raise NilesError("unknown_command", "Unknown survey command.")
+
+
+def dispatch_intake(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.intake_command == "publish":
+        return ok("intake publish", argv, project.publish_form("intake", args.survey))
+    if args.intake_command == "pull":
+        return ok("intake pull", argv, project.pull_form(args.form_id, "intake", Path(args.from_file) if args.from_file else None))
+    if args.intake_command == "status":
+        return ok("intake status", argv, {"forms": project.list_forms("intake"), "pending": project.list_submissions("intake")})
+    if args.intake_command == "close":
+        return ok("intake close", argv, project.close_form(args.form_id, "intake"))
+    if args.intake_command == "review":
+        if not args.submission_id:
+            return ok("intake review", argv, {"pending": project.list_submissions("intake")})
+        if not (args.accept or args.reject or args.merge):
+            raise NilesError("decision_required", "Choose --accept, --reject, or --merge <contact-ref>.")
+        decision = "reject" if args.reject else "accept"
+        return ok("intake review", argv, project.review_submission(args.submission_id, "intake", decision, merge_ref=args.merge, note=args.note))
+    raise NilesError("unknown_command", "Unknown intake command.")
+
+
+def dispatch_status_request(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.status_request_command == "publish":
+        return ok("status-request publish", argv, project.publish_form("status-request", args.survey, args.contact, args.recipient))
+    if args.status_request_command == "pull":
+        return ok("status-request pull", argv, project.pull_form(args.form_id, "status-request", Path(args.from_file) if args.from_file else None))
+    if args.status_request_command == "status":
+        return ok("status-request status", argv, {"forms": project.list_forms("status-request"), "pending": project.list_submissions("status-request")})
+    if args.status_request_command == "review":
+        if not args.submission_id:
+            return ok("status-request review", argv, {"pending": project.list_submissions("status-request")})
+        if not (args.accept or args.reject):
+            raise NilesError("decision_required", "Choose --accept or --reject.")
+        decision = "reject" if args.reject else "accept"
+        return ok("status-request review", argv, project.review_submission(args.submission_id, "status-request", decision, note=args.note))
+    raise NilesError("unknown_command", "Unknown status-request command.")
+
+
+def dispatch_recommend(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
+    if args.recommend_command == "export":
+        return ok("recommend export", argv, project.export_recommendation_job(args.name, Path(args.output), args.tag))
+    if args.recommend_command == "import":
+        return ok("recommend import", argv, project.import_recommendations(Path(args.path)))
+    if args.recommend_command == "review":
+        return ok("recommend review", argv, {"pending": project.list_recommendations()})
+    if args.recommend_command == "accept":
+        return ok("recommend accept", argv, project.review_recommendation(args.recommendation_id, True, args.assign, args.due))
+    if args.recommend_command == "reject":
+        return ok("recommend reject", argv, project.review_recommendation(args.recommendation_id, False))
+    raise NilesError("unknown_command", "Unknown recommend command.")
+
+
 def dispatch_report(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
     if args.report_command == "status":
         return ok("report status", argv, project.render_status_html(Path(args.html)))
@@ -593,6 +805,11 @@ def command_name(args: argparse.Namespace) -> str:
         "org_command",
         "org_context_command",
         "material_command",
+        "teammate_command",
+        "survey_command",
+        "intake_command",
+        "status_request_command",
+        "recommend_command",
         "report_command",
         "enrich_command",
     ):

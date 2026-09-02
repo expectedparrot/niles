@@ -16,7 +16,7 @@ dependencies = []
 
 [project.optional-dependencies]
 edsl = ["edsl"]
-test = ["pytest"]
+test = ["pytest", "pytest-cov"]
 
 [project.scripts]
 niles = "niles.cli:main"

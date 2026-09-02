@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
 import json
+import os
 import re
 import shutil
 import sqlite3
+import tomllib
 import zipfile
 import uuid
 from dataclasses import dataclass
@@ -78,6 +83,14 @@ SUPPORTED_EVENT_TYPES = {
     "task_updated",
     "org_context_set",
     "material_added",
+    "teammate_added",
+    "event_reverted",
+    "form_published",
+    "form_closed",
+    "submission_received",
+    "submission_reviewed",
+    "recommendation_imported",
+    "recommendation_reviewed",
 }
 
 
@@ -132,6 +145,12 @@ class Project:
         niles_gitignore = project.state_dir / ".gitignore"
         if not niles_gitignore.exists():
             niles_gitignore.write_text("index/\n", encoding="utf-8")
+        from .surveys import TEMPLATES, template_definition
+
+        for survey_name in TEMPLATES:
+            survey_path = project.state_dir / "surveys" / f"{survey_name}.json"
+            if not survey_path.exists():
+                survey_path.write_text(json.dumps(template_definition(survey_name), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         project.rebuild_index()
         return project
 
@@ -348,17 +367,80 @@ class Project:
               tags text not null,
               created_at text not null
             );
+            create table if not exists teammates (
+              id text primary key,
+              name text not null,
+              aliases text not null,
+              email text,
+              role text,
+              created_at text not null
+            );
+            create virtual table if not exists crm_search using fts5(
+              entity_type unindexed,
+              entity_id unindexed,
+              contact_id unindexed,
+              label,
+              body
+            );
+            create table if not exists forms (
+              id text primary key,
+              kind text not null,
+              survey_name text not null,
+              remote_uuid text not null,
+              respondent_url text,
+              admin_url text,
+              contact_id text,
+              recipient text,
+              status text not null,
+              created_at text not null
+            );
+            create table if not exists submissions (
+              id text primary key,
+              form_id text not null,
+              remote_id text,
+              answers text not null,
+              status text not null,
+              matched_contact_id text,
+              received_at text not null,
+              reviewed_at text,
+              review_note text
+            );
+            create table if not exists recommendations (
+              id text primary key,
+              contact_id text not null,
+              text text not null,
+              rationale text,
+              source_path text not null,
+              status text not null,
+              imported_at text not null,
+              reviewed_at text
+            );
             """
         )
         conn.commit()
 
+    def _refresh_search_index(self, conn: sqlite3.Connection) -> None:
+        conn.execute("delete from crm_search")
+        for row in conn.execute("select * from contacts where archived = 0").fetchall():
+            contact = self._contact_from_row(row)
+            body = " ".join(
+                [contact["name"], contact.get("company") or "", contact.get("role") or "", dumps(contact["traits"]), " ".join(contact["tags"])]
+            )
+            conn.execute("insert into crm_search values (?, ?, ?, ?, ?)", ("contact", contact["id"], contact["id"], contact["name"], body))
+        for row in conn.execute("select notes.*, contacts.name as contact_name from notes join contacts on notes.contact_id = contacts.id").fetchall():
+            conn.execute("insert into crm_search values (?, ?, ?, ?, ?)", ("note", row["id"], row["contact_id"], row["text"], row["text"]))
+        for row in conn.execute("select tasks.*, contacts.name as contact_name from tasks left join contacts on tasks.contact_id = contacts.id").fetchall():
+            conn.execute("insert into crm_search values (?, ?, ?, ?, ?)", ("task", row["id"], row["contact_id"], row["text"], row["text"]))
+
     def rebuild_index(self) -> None:
         if self.index_path.exists():
             self.index_path.unlink()
+        events = self._read_events()
+        reverted = {event["payload"]["target_event_id"] for event in events if event["type"] == "event_reverted"}
         with self.connect() as conn:
-            for path in sorted(self.events_dir.glob("*.json")):
-                event = json.loads(path.read_text(encoding="utf-8"))
-                self._apply_event(conn, event)
+            for event in events:
+                if event["event_id"] not in reverted:
+                    self._apply_event(conn, event)
 
     def rebuild_index_report(self) -> dict[str, Any]:
         self.rebuild_index()
@@ -452,6 +534,11 @@ class Project:
     def _replay_errors(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if any(event.get("schema_version") != EVENT_SCHEMA_VERSION for event in events):
             return []
+        reverted = {
+            event["payload"]["target_event_id"]
+            for event in events
+            if event.get("type") == "event_reverted"
+        }
         with TemporaryDirectory(prefix="niles-fsck-") as tmp:
             probe = Project(Path(tmp))
             probe.events_dir.mkdir(parents=True, exist_ok=True)
@@ -459,7 +546,8 @@ class Project:
             try:
                 with probe.connect() as conn:
                     for event in events:
-                        probe._apply_event(conn, event)
+                        if event["event_id"] not in reverted:
+                            probe._apply_event(conn, event)
                     orphan_notes = conn.execute(
                         """
                         select count(*)
@@ -476,6 +564,12 @@ class Project:
                          where tasks.contact_id is not null and contacts.id is null
                         """
                     ).fetchone()[0]
+                    orphan_submissions = conn.execute(
+                        "select count(*) from submissions left join forms on submissions.form_id = forms.id where forms.id is null"
+                    ).fetchone()[0]
+                    orphan_recommendations = conn.execute(
+                        "select count(*) from recommendations left join contacts on recommendations.contact_id = contacts.id where contacts.id is null"
+                    ).fetchone()[0]
             except Exception as exc:  # noqa: BLE001 - fsck reports replay failures as data.
                 return [{"code": "replay_failed", "message": str(exc)}]
         replay_errors = []
@@ -483,6 +577,10 @@ class Project:
             replay_errors.append({"code": "orphan_notes", "count": orphan_notes})
         if orphan_tasks:
             replay_errors.append({"code": "orphan_tasks", "count": orphan_tasks})
+        if orphan_submissions:
+            replay_errors.append({"code": "orphan_submissions", "count": orphan_submissions})
+        if orphan_recommendations:
+            replay_errors.append({"code": "orphan_recommendations", "count": orphan_recommendations})
         return replay_errors
 
     def apply_event(self, event: dict[str, Any]) -> None:
@@ -648,7 +746,67 @@ class Project:
                     payload["created_at"],
                 ),
             )
+        elif kind == "teammate_added":
+            conn.execute(
+                "insert or replace into teammates (id, name, aliases, email, role, created_at) values (?, ?, ?, ?, ?, ?)",
+                (payload["id"], payload["name"], dumps(payload.get("aliases", [])), payload.get("email"), payload.get("role"), payload["created_at"]),
+            )
+        elif kind == "event_reverted":
+            pass
+        elif kind == "form_published":
+            conn.execute(
+                "insert or replace into forms (id, kind, survey_name, remote_uuid, respondent_url, admin_url, contact_id, recipient, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+                (payload["id"], payload["kind"], payload["survey_name"], payload["remote_uuid"], payload.get("respondent_url"), payload.get("admin_url"), payload.get("contact_id"), payload.get("recipient"), payload["created_at"]),
+            )
+        elif kind == "form_closed":
+            conn.execute("update forms set status = 'closed' where id = ?", (payload["id"],))
+        elif kind == "submission_received":
+            conn.execute(
+                "insert or ignore into submissions (id, form_id, remote_id, answers, status, matched_contact_id, received_at) values (?, ?, ?, ?, 'pending', ?, ?)",
+                (payload["id"], payload["form_id"], payload.get("remote_id"), dumps(payload["answers"]), payload.get("matched_contact_id"), payload["received_at"]),
+            )
+        elif kind == "submission_reviewed":
+            conn.execute(
+                "update submissions set status = ?, matched_contact_id = coalesce(?, matched_contact_id), reviewed_at = ?, review_note = ? where id = ?",
+                (payload["status"], payload.get("matched_contact_id"), payload["reviewed_at"], payload.get("note"), payload["id"]),
+            )
+        elif kind == "recommendation_imported":
+            conn.execute("insert or replace into recommendations (id, contact_id, text, rationale, source_path, status, imported_at) values (?, ?, ?, ?, ?, 'pending', ?)", (payload["id"], payload["contact_id"], payload["text"], payload.get("rationale"), payload["source_path"], payload["imported_at"]))
+        elif kind == "recommendation_reviewed":
+            conn.execute("update recommendations set status = ?, reviewed_at = ? where id = ?", (payload["status"], payload["reviewed_at"], payload["id"]))
+        self._refresh_search_index(conn)
         conn.commit()
+
+    def _read_events(self) -> list[dict[str, Any]]:
+        return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(self.events_dir.glob("*.json"))]
+
+    def history(self, contact_ref: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        events = self._read_events()
+        if contact_ref:
+            contact_id = self.resolve_contact(contact_ref)["id"]
+            keys = ("id", "contact_id", "keep_id", "duplicate_id")
+            events = [event for event in events if contact_id in {event["payload"].get(key) for key in keys}]
+        events.reverse()
+        return events[:limit] if limit else events
+
+    def undo(self, event_id: str) -> dict[str, Any]:
+        events = self._read_events()
+        target = next((event for event in events if event["event_id"] == event_id), None)
+        if target is None:
+            raise NilesError("unknown_event", f"No event matched '{event_id}'.", {"event_id": event_id})
+        if target["type"] == "event_reverted":
+            raise NilesError("cannot_undo_revert", "A compensation event cannot itself be undone.")
+        if any(event["type"] == "event_reverted" and event["payload"]["target_event_id"] == event_id for event in events):
+            raise NilesError("already_reverted", "That event has already been reverted.", {"event_id": event_id})
+        reverted_ids = {event["payload"]["target_event_id"] for event in events if event["type"] == "event_reverted"}
+        if target["type"] == "contact_created":
+            contact_id = target["payload"]["id"]
+            dependent = [event["event_id"] for event in events if event["event_id"] not in reverted_ids and event["event_id"] != event_id and contact_id in event["payload"].values()]
+            if dependent:
+                raise NilesError("undo_has_dependents", "Undo dependent contact events first.", {"dependent_event_ids": dependent})
+        event = self.append_event("event_reverted", {"target_event_id": event_id, "target_type": target["type"], "created_at": utc_now()})
+        self.rebuild_index()
+        return {"reverted_event_id": event_id, "compensation_event_id": event["event_id"], "events_written": 1}
 
     def add_contact(
         self,
@@ -785,7 +943,16 @@ class Project:
         if tag:
             contacts = [c for c in contacts if tag in c["tags"]]
         if stale:
-            contacts = [c for c in contacts if c.get("cadence_days") and c.get("last_touched") is None]
+            now = datetime.now(timezone.utc)
+            contacts = [
+                contact
+                for contact in contacts
+                if contact.get("cadence_days")
+                and (
+                    not contact.get("last_touched")
+                    or (now - datetime.fromisoformat(contact["last_touched"].replace("Z", "+00:00"))).days >= contact["cadence_days"]
+                )
+            ]
         return contacts
 
     def add_note(self, ref: str, text: str, kind: str, at: str | None) -> dict[str, Any]:
@@ -1021,6 +1188,393 @@ class Project:
             materials = [material for material in materials if tag in material["tags"]]
         return materials
 
+    def add_teammate(self, name: str, aliases: list[str], email: str | None, role: str | None) -> dict[str, Any]:
+        payload = {"id": new_id("team"), "name": name, "aliases": unique(aliases), "email": email, "role": role, "created_at": utc_now()}
+        event = self.append_event("teammate_added", payload)
+        return {"teammate": payload, "events_written": 1, "event_id": event["event_id"]}
+
+    def list_teammates(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("select * from teammates order by name").fetchall()
+        return [{"id": row["id"], "name": row["name"], "aliases": loads(row["aliases"], []), "email": row["email"], "role": row["role"], "created_at": row["created_at"]} for row in rows]
+
+    def resolve_teammate(self, ref: str) -> dict[str, Any]:
+        lowered = ref.lower()
+        matches = [item for item in self.list_teammates() if lowered in {item["id"].lower(), item["name"].lower(), item["email"].lower() if item["email"] else "", *(alias.lower() for alias in item["aliases"])}]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise NilesError("ambiguous_reference", f"Reference '{ref}' matched multiple teammates.", {"candidates": matches})
+        raise NilesError("unknown_teammate", f"No teammate matched '{ref}'.", {"ref": ref})
+
+    def search(self, terms: str) -> list[dict[str, Any]]:
+        query = terms.strip()
+        if not query:
+            raise NilesError("empty_search", "Search terms cannot be empty.")
+        match_query = '"' + query.replace('"', '""') + '"'
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    "select entity_type, entity_id, contact_id, label, bm25(crm_search) as rank from crm_search where crm_search match ? order by rank",
+                    (match_query,),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            raise NilesError("invalid_search", f"Invalid search expression: {terms}") from exc
+        return [{"type": row["entity_type"], "id": row["entity_id"], "contact_id": row["contact_id"], "label": row["label"], "match": terms, "rank": row["rank"]} for row in rows]
+
+    def export_contacts(self, format_name: str, output: Path | None, tag: str | None = None) -> dict[str, Any]:
+        contacts = self.list_contacts(tag=tag)
+        rows = [{**contact, "emails": ";".join(contact["emails"]), "phones": ";".join(contact["phones"]), "tags": ";".join(contact["tags"]), "traits": dumps(contact["traits"])} for contact in contacts]
+        if format_name == "json":
+            content = json.dumps(contacts, indent=2, sort_keys=True) + "\n"
+        else:
+            fields = ["id", "name", "emails", "phones", "company", "role", "traits", "tags", "cadence_days", "archived", "created_at"]
+            stream = io.StringIO()
+            writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+            content = stream.getvalue()
+        path = None
+        if output:
+            path = output if output.is_absolute() else self.root / output
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        return {"format": format_name, "count": len(contacts), "path": str(path) if path else None, "content": None if path else content}
+
+    def import_csv(self, path: Path, commit: bool = False, mapping_path: Path | None = None) -> dict[str, Any]:
+        source = path if path.is_absolute() else self.root / path
+        if not source.is_file():
+            raise NilesError("import_not_found", f"CSV file not found: {path}")
+        with source.open(newline="", encoding="utf-8-sig") as handle:
+            rows = list(csv.DictReader(handle))
+        mapping: dict[str, str] = {}
+        if mapping_path:
+            mapping_source = mapping_path if mapping_path.is_absolute() else self.root / mapping_path
+            if not mapping_source.is_file():
+                raise NilesError("mapping_not_found", f"Mapping file not found: {mapping_path}")
+            with mapping_source.open("rb") as handle:
+                mapping = tomllib.load(handle).get("columns", {})
+            allowed = {"name", "email", "emails", "company", "role", "tags"}
+            if not mapping or any(field not in allowed for field in mapping.values()):
+                raise NilesError("invalid_mapping", "[columns] must map CSV columns to supported contact fields.")
+            rows = [{mapping.get(key, key): value for key, value in row.items()} for row in rows]
+        required = {"name"}
+        if not rows or not required.issubset(rows[0]):
+            raise NilesError("invalid_csv", "CSV requires a name column.")
+        preview = []
+        for row_number, row in enumerate(rows, start=2):
+            if not (row.get("name") or "").strip():
+                raise NilesError("invalid_csv", f"Row {row_number} has no name.")
+            preview.append({"name": row["name"].strip(), "emails": [v for v in (row.get("emails") or row.get("email") or "").split(";") if v], "company": row.get("company") or None, "role": row.get("role") or None, "tags": [v for v in (row.get("tags") or "").split(";") if v]})
+        event_ids = []
+        if commit:
+            for item in preview:
+                result = self.add_contact(item["name"], item["emails"], [], item["company"], item["role"], {}, item["tags"], None)
+                event_ids.append(result["event_id"])
+        return {"path": str(source), "mapping": mapping, "dry_run": not commit, "count": len(preview), "contacts": preview, "events_written": len(event_ids), "event_ids": event_ids}
+
+    def list_surveys(self) -> list[dict[str, Any]]:
+        surveys = []
+        for path in sorted((self.state_dir / "surveys").glob("*.json")):
+            definition = self._read_survey_path(path)
+            surveys.append({"name": definition["name"], "description": definition.get("description"), "version": definition.get("version"), "template": definition.get("template", False), "path": str(path)})
+        return surveys
+
+    def _read_survey_path(self, path: Path) -> dict[str, Any]:
+        from .surveys import validate_survey
+
+        try:
+            definition = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise NilesError("invalid_survey_json", f"Survey is not valid JSON: {path.name}") from exc
+        return validate_survey(definition)
+
+    def get_survey(self, name: str) -> dict[str, Any]:
+        path = self.state_dir / "surveys" / f"{slugify(name)}.json"
+        if not path.is_file():
+            raise NilesError("unknown_survey", f"No survey matched '{name}'.")
+        return self._read_survey_path(path)
+
+    def copy_survey(self, source_name: str, destination_name: str) -> dict[str, Any]:
+        definition = self.get_survey(source_name)
+        destination = self.state_dir / "surveys" / f"{slugify(destination_name)}.json"
+        if destination.exists():
+            raise NilesError("survey_exists", f"Survey '{destination_name}' already exists.")
+        definition.update({"name": slugify(destination_name), "template": False, "version": 1})
+        destination.write_text(json.dumps(definition, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return {"survey": definition, "path": str(destination)}
+
+    def run_survey(self, name: str, contact_ref: str | None, answers: dict[str, Any] | None, dry_run: bool) -> dict[str, Any]:
+        definition = self.get_survey(name)
+        if answers is None:
+            return {"survey": definition, "requires_answers": True}
+        question_names = {question["name"] for question in definition["questions"]}
+        unknown = sorted(set(answers) - question_names)
+        if unknown:
+            raise NilesError("unknown_answers", "Answers contain unknown question names.", {"questions": unknown})
+        missing = [question["name"] for question in definition["questions"] if question.get("required") and not answers.get(question["name"])]
+        if missing:
+            raise NilesError("missing_answers", "Required answers are missing.", {"questions": missing})
+        invalid_choices = [
+            question["name"]
+            for question in definition["questions"]
+            if question.get("type") == "choice"
+            and question["name"] in answers
+            and answers[question["name"]] not in question.get("options", [])
+        ]
+        if invalid_choices:
+            raise NilesError("invalid_answers", "Choice answers must use a declared option.", {"questions": invalid_choices})
+        contact = self.resolve_contact(contact_ref) if contact_ref else None
+        previews = []
+        routes = definition.get("routes", {})
+        for question_name, route in routes.items():
+            value = answers.get(question_name)
+            if value in (None, ""):
+                continue
+            action = route["action"]
+            mutation = {"action": action, "question": question_name, "value": value}
+            if action in {"append_note", "set_field", "set_trait", "create_task", "add_tag", "archive"} and not contact:
+                mutation["blocked"] = "contact_required"
+            previews.append(mutation)
+        if any(item.get("blocked") for item in previews) and not dry_run:
+            raise NilesError("contact_required", "This routed survey requires --contact.")
+        applied = []
+        if not dry_run:
+            for item in previews:
+                action, value = item["action"], item["value"]
+                route = routes[item["question"]]
+                if action == "append_note":
+                    applied.append(self.add_note(contact["id"], str(value), route.get("kind", "note"), None))
+                elif action == "set_trait":
+                    applied.append(self.update_contact(contact["id"], traits={route["trait"]: value}))
+                elif action == "set_field":
+                    field = route.get("field")
+                    if field not in {"name", "company", "role", "cadence_days"}:
+                        raise NilesError("protected_field", f"Survey cannot set field '{field}'.")
+                    applied.append(self.update_contact(contact["id"], **{field: value}))
+                elif action == "add_tag":
+                    applied.append(self.update_contact(contact["id"], add_tags=[str(value)]))
+                elif action == "archive":
+                    applied.append(self.archive_contact(contact["id"], reason=f"survey:{name}"))
+                elif action == "create_task":
+                    due = next((answers.get(q) for q, r in routes.items() if r.get("action") == "task_due" and r.get("binds") == item["question"]), None)
+                    owner = next((answers.get(q) for q, r in routes.items() if r.get("action") == "task_assignee" and r.get("binds") == item["question"]), None)
+                    applied.append(self.add_task(contact["id"], str(value), due, owner, []))
+        return {"survey": name, "contact": contact, "answers": answers, "dry_run": dry_run, "preview": previews, "applied": applied, "events_written": sum(item.get("events_written", 0) for item in applied)}
+
+    def export_survey_edsl(self, name: str, output: Path) -> dict[str, Any]:
+        definition = self.get_survey(name)
+        survey = self._make_edsl_survey(definition)
+        bundle = {
+            "schema_version": "niles.edsl-handoff.v1",
+            "kind": "survey",
+            "survey": survey.to_dict(),
+            "routing": definition.get("routes", {}),
+            "network": False,
+        }
+        path = output if output.is_absolute() else self.root / output
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return {"path": str(path), "schema_version": bundle["schema_version"], "question_count": len(definition["questions"]), "network": False}
+
+    def _make_edsl_survey(self, definition: dict[str, Any]):
+        try:
+            from edsl import QuestionFreeText, QuestionMultipleChoice, Survey
+        except ImportError as exc:
+            raise NilesError(
+                "edsl_not_installed",
+                "EDSL export requires the optional edsl dependency. Install niles[edsl].",
+            ) from exc
+        questions = []
+        for question in definition["questions"]:
+            kwargs = {"question_name": question["name"], "question_text": question["text"]}
+            if question.get("type") == "choice":
+                questions.append(QuestionMultipleChoice(**kwargs, question_options=question["options"]))
+            else:
+                questions.append(QuestionFreeText(**kwargs))
+        return Survey(questions=questions, name=definition["name"])
+
+    def publish_form(self, kind: str, survey_name: str, contact_ref: str | None = None, recipient: str | None = None) -> dict[str, Any]:
+        if not os.environ.get("EXPECTED_PARROT_API_KEY"):
+            raise NilesError("missing_ep_api_key", "Set EXPECTED_PARROT_API_KEY before publishing a humanized survey.")
+        definition = self.get_survey(survey_name)
+        if kind == "intake":
+            forbidden = [route["action"] for route in definition.get("routes", {}).values() if route["action"] in {"archive", "set_field"}]
+            if forbidden:
+                raise NilesError("unsafe_intake_route", "Intake surveys cannot archive contacts or set protected fields.")
+        contact = self.resolve_contact(contact_ref) if contact_ref else None
+        survey = self._make_edsl_survey(definition)
+        try:
+            details = dict(survey.humanize(human_survey_name=f"Niles {kind}: {survey_name}", survey_description=definition.get("description")))
+        except Exception as exc:  # Network/auth errors become stable Niles errors.
+            raise NilesError("humanize_failed", str(exc)) from exc
+        payload = {
+            "id": new_id("form"), "kind": kind, "survey_name": survey_name,
+            "remote_uuid": str(details["uuid"]), "respondent_url": details.get("respondent_url"),
+            "admin_url": details.get("admin_url"), "contact_id": contact["id"] if contact else None,
+            "recipient": recipient, "created_at": utc_now(),
+        }
+        event = self.append_event("form_published", payload)
+        return {"form": payload, "remote": details, "events_written": 1, "event_id": event["event_id"]}
+
+    def list_forms(self, kind: str | None = None) -> list[dict[str, Any]]:
+        query, params = "select * from forms", []
+        if kind:
+            query, params = query + " where kind = ?", [kind]
+        query += " order by created_at desc"
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+    def resolve_form(self, ref: str, kind: str | None = None) -> dict[str, Any]:
+        forms = self.list_forms(kind)
+        matches = [form for form in forms if ref in {form["id"], form["remote_uuid"]}]
+        if len(matches) == 1:
+            return matches[0]
+        raise NilesError("unknown_form", f"No form matched '{ref}'.", {"ref": ref})
+
+    def pull_form(self, form_ref: str, kind: str, response_file: Path | None = None) -> dict[str, Any]:
+        form = self.resolve_form(form_ref, kind)
+        if response_file:
+            path = response_file if response_file.is_absolute() else self.root / response_file
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise NilesError("invalid_responses", f"Could not read responses: {response_file}") from exc
+        else:
+            if not os.environ.get("EXPECTED_PARROT_API_KEY"):
+                raise NilesError("missing_ep_api_key", "Set EXPECTED_PARROT_API_KEY before pulling responses.")
+            try:
+                from edsl.coop import Coop
+                raw_object = Coop().get_human_survey_responses(form["remote_uuid"])
+                raw = raw_object.to_dict() if hasattr(raw_object, "to_dict") else raw_object
+            except ImportError as exc:
+                raise NilesError("edsl_not_installed", "Response pulling requires niles[edsl].") from exc
+            except Exception as exc:
+                raise NilesError("humanize_pull_failed", str(exc)) from exc
+        records = raw.get("data", raw.get("responses", [])) if isinstance(raw, dict) else raw
+        if not isinstance(records, list):
+            raise NilesError("invalid_responses", "Responses must contain a data or responses list.")
+        written, skipped = [], 0
+        for record in records:
+            answers = record.get("answer", record.get("answers", record)) if isinstance(record, dict) else None
+            if not isinstance(answers, dict):
+                continue
+            digest = hashlib.sha256(dumps(answers).encode()).hexdigest()[:24]
+            remote_id = str(record.get("id") or record.get("response_id") or digest)
+            with self.connect() as conn:
+                exists = conn.execute("select 1 from submissions where form_id = ? and remote_id = ?", (form["id"], remote_id)).fetchone()
+            if exists:
+                skipped += 1
+                continue
+            matched = None
+            email = answers.get("email")
+            if email:
+                with self.connect() as conn:
+                    row = conn.execute("select * from contacts where emails like ? and archived = 0", (f'%"{email}"%',)).fetchone()
+                matched = row["id"] if row else None
+            payload = {"id": new_id("sub"), "form_id": form["id"], "remote_id": remote_id, "answers": answers, "matched_contact_id": matched, "received_at": utc_now()}
+            written.append(self.append_event("submission_received", payload)["event_id"])
+        return {"form": form, "received": len(written), "skipped": skipped, "event_ids": written, "quarantined": True}
+
+    def list_submissions(self, kind: str, status: str = "pending") -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("select submissions.*, forms.kind, forms.survey_name, forms.contact_id from submissions join forms on submissions.form_id = forms.id where forms.kind = ? and submissions.status = ? order by received_at", (kind, status)).fetchall()
+        return [{**dict(row), "answers": loads(row["answers"], {})} for row in rows]
+
+    def review_submission(self, submission_id: str, kind: str, decision: str, merge_ref: str | None = None, note: str | None = None) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("select submissions.*, forms.kind, forms.survey_name, forms.contact_id from submissions join forms on submissions.form_id = forms.id where submissions.id = ?", (submission_id,)).fetchone()
+        if row is None or row["kind"] != kind:
+            raise NilesError("unknown_submission", f"No {kind} submission matched '{submission_id}'.")
+        if row["status"] != "pending":
+            raise NilesError("submission_reviewed", "Submission has already been reviewed.")
+        answers, applied, matched = loads(row["answers"], {}), [], row["matched_contact_id"]
+        if decision == "reject":
+            final_status = "rejected"
+        elif kind == "intake":
+            if merge_ref or matched:
+                contact = self.resolve_contact(merge_ref or matched)
+                matched, final_status = contact["id"], "merged"
+            else:
+                result = self.add_contact(str(answers.get("name") or "Unnamed contact"), [answers["email"]] if answers.get("email") else [], [], answers.get("company"), None, {}, ["intake"], None)
+                matched, final_status = result["contact"]["id"], "accepted"
+                applied.append(result)
+            applied.append(self.run_survey(row["survey_name"], matched, answers, False))
+        else:
+            matched = row["contact_id"]
+            if not matched:
+                raise NilesError("contact_required", "Status submission has no registered contact.")
+            applied.append(self.run_survey(row["survey_name"], matched, answers, False))
+            final_status = "accepted"
+        review_event = self.append_event("submission_reviewed", {"id": submission_id, "status": final_status, "matched_contact_id": matched, "reviewed_at": utc_now(), "note": note})
+        return {"submission_id": submission_id, "status": final_status, "matched_contact_id": matched, "applied": applied, "review_event_id": review_event["event_id"]}
+
+    def close_form(self, form_ref: str, kind: str) -> dict[str, Any]:
+        form = self.resolve_form(form_ref, kind)
+        event = self.append_event("form_closed", {"id": form["id"], "created_at": utc_now()})
+        return {"form_id": form["id"], "status": "closed", "remote_closed": False, "events_written": 1, "event_id": event["event_id"]}
+
+    def export_recommendation_job(self, name: str, output: Path, tag: str | None = None) -> dict[str, Any]:
+        try:
+            from edsl import QuestionFreeText, Scenario, ScenarioList, Survey
+        except ImportError as exc:
+            raise NilesError("edsl_not_installed", "Recommendation export requires niles[edsl].") from exc
+        contacts = self.list_contacts(tag=tag)
+        scenarios = []
+        for contact in contacts:
+            scenarios.append({"contact_id": contact["id"], "name": contact["name"], "company": contact.get("company"), "traits": contact["traits"], "recent_notes": [note["text"] for note in self.list_notes(contact["id"], limit=5)], "open_tasks": [task["text"] for task in self.list_tasks(status="open", contact_ref=contact["id"])]})
+        questions = [
+            QuestionFreeText(question_name="recommended_task", question_text="Recommend the single best next relationship action for {{ name }} at {{ company }}. Context: traits={{ traits }}, recent notes={{ recent_notes }}, open tasks={{ open_tasks }}."),
+            QuestionFreeText(question_name="rationale", question_text="Briefly explain why this is the best next action for {{ name }}."),
+        ]
+        job = Survey(questions, name=name).by(ScenarioList([Scenario(item) for item in scenarios]))
+        path = output if output.is_absolute() else self.root / output
+        path.parent.mkdir(parents=True, exist_ok=True)
+        job.save(str(path))
+        manifest = path.with_suffix(path.suffix + ".manifest.json")
+        manifest.write_text(json.dumps({"schema_version": "niles.recommend-job.v1", "name": name, "job_path": str(path), "contact_ids": [item["contact_id"] for item in scenarios], "created_at": utc_now()}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return {"path": str(path), "manifest": str(manifest), "contacts": len(scenarios), "run_command": f"ep run {path} --output <results-path>", "network": False}
+
+    def import_recommendations(self, results_path: Path) -> dict[str, Any]:
+        path = results_path if results_path.is_absolute() else self.root / results_path
+        try:
+            if path.suffix == ".ep":
+                from edsl import Results
+                raw = Results.load(str(path)).to_dict()
+            else:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise NilesError("invalid_recommendation_results", f"Could not read recommendation results: {path}") from exc
+        records = raw.get("data", [])
+        imported = []
+        for record in records:
+            scenario, answer = record.get("scenario", {}), record.get("answer", {})
+            contact_id, task = scenario.get("contact_id"), answer.get("recommended_task")
+            if not contact_id or not task:
+                continue
+            with self.connect() as conn:
+                self._contact_by_id(conn, contact_id)
+            payload = {"id": new_id("rec"), "contact_id": contact_id, "text": str(task), "rationale": answer.get("rationale"), "source_path": str(path), "imported_at": utc_now()}
+            self.append_event("recommendation_imported", payload)
+            imported.append(payload["id"])
+        return {"path": str(path), "imported": len(imported), "recommendation_ids": imported, "quarantined": True}
+
+    def list_recommendations(self, status: str = "pending") -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute("select recommendations.*, contacts.name as contact from recommendations join contacts on recommendations.contact_id = contacts.id where recommendations.status = ? order by imported_at", (status,)).fetchall()]
+
+    def review_recommendation(self, recommendation_id: str, accept: bool, assignee: str | None = None, due: str | None = None) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("select * from recommendations where id = ?", (recommendation_id,)).fetchone()
+        if row is None:
+            raise NilesError("unknown_recommendation", f"No recommendation matched '{recommendation_id}'.")
+        if row["status"] != "pending":
+            raise NilesError("recommendation_reviewed", "Recommendation has already been reviewed.")
+        task = self.add_task(row["contact_id"], row["text"], due, assignee, ["recommendation"]) if accept else None
+        status = "accepted" if accept else "rejected"
+        event = self.append_event("recommendation_reviewed", {"id": recommendation_id, "status": status, "reviewed_at": utc_now(), "task_event_id": task.get("event_id") if task else None, "source_path": row["source_path"]})
+        return {"recommendation_id": recommendation_id, "status": status, "task": task, "event_id": event["event_id"]}
+
     def render_status_html(self, output: Path) -> dict[str, Any]:
         out = output.expanduser()
         if not out.is_absolute():
@@ -1045,8 +1599,10 @@ class Project:
                 "open_tasks": conn.execute("select count(*) from tasks where status = 'open'").fetchone()[0],
                 "done_tasks": conn.execute("select count(*) from tasks where status = 'done'").fetchone()[0],
                 "materials": conn.execute("select count(*) from materials").fetchone()[0],
-                "pending_intake": 0,
-                "pending_status_updates": 0,
+                "teammates": conn.execute("select count(*) from teammates").fetchone()[0],
+                "pending_intake": conn.execute("select count(*) from submissions join forms on submissions.form_id = forms.id where submissions.status = 'pending' and forms.kind = 'intake'").fetchone()[0],
+                "pending_status_updates": conn.execute("select count(*) from submissions join forms on submissions.form_id = forms.id where submissions.status = 'pending' and forms.kind = 'status-request'").fetchone()[0],
+                "pending_recommendations": conn.execute("select count(*) from recommendations where status = 'pending'").fetchone()[0],
             }
 
     def _contact_by_id(self, conn: sqlite3.Connection, contact_id: str) -> dict[str, Any]:
