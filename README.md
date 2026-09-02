@@ -512,18 +512,36 @@ pulling, authentication, or other network activity.
 
 ### Ask for updates on every entity
 
-Build one EDSL survey that walks a teammate through every active CRM entity:
+Build an EDSL survey for the active sales pipeline (the default scope):
 
 ```bash
 niles human-update --output update_job.ep
 ```
 
-The survey begins with one matrix showing every current status. Each row is
-classified as `Current`, `Follow up`, `Waiting on them`, `Waiting on us`,
-`Stalled`, `Won`, or `Lost / dead`. Current rows need no more input. Other rows
-open a focused notes prompt; nonterminal rows also open an action checklist plus
-next-action, owner, and due-date fields. The command is offline and returns a
-`publish_command` such as:
+Select another entity type or compose filters when the review has a different
+purpose:
+
+```bash
+niles human-update --scope people --output relationship_update.ep
+niles human-update --scope organizations --tag prospect \
+  --stage contracting --output contracts.ep
+niles human-update --scope all --entity-id <contact-id> \
+  --include-archived --output selected.ep
+```
+
+Scopes are `pipeline`, `people`, `organizations`, and `all`. Repeated tags are
+combined with AND; repeated stages and explicit entity IDs are combined with
+OR inside their respective filter. Archived entities remain excluded unless
+`--include-archived` is present. The JSON envelope and companion manifest both
+record the applied scope and filters.
+
+Pipeline surveys classify each row as `Current`, `Follow up`, `Waiting on
+them`, `Waiting on us`, `Stalled`, `Won`, or `Lost / dead`; people and general
+organization scopes use relationship-appropriate choices instead of sales
+stages. Current rows need no more input. Other rows open a focused notes prompt;
+nonterminal rows also open a tailored action checklist plus next-action, owner,
+and due-date fields. The command is offline and returns a `publish_command`
+such as:
 
 ```bash
 ep humanize create --survey update_job.ep --name "Niles status update"

@@ -257,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     human_update = sub.add_parser("human-update")
     human_update.add_argument("--output", required=True)
+    human_update.add_argument("--scope", choices=["pipeline", "people", "organizations", "all"], default="pipeline")
+    human_update.add_argument("--tag", action="append", default=[])
+    human_update.add_argument("--stage", action="append", default=[])
+    human_update.add_argument("--entity-id", action="append", default=[])
+    human_update.add_argument("--include-archived", action="store_true")
 
     recommend = sub.add_parser("recommend")
     recommend_sub = recommend.add_subparsers(dest="recommend_command", required=True)
@@ -439,7 +444,18 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
     if args.command == "status-request":
         return dispatch_status_request(project, args, argv)
     if args.command == "human-update":
-        return ok("human-update", argv, project.export_human_update(Path(args.output)))
+        return ok(
+            "human-update",
+            argv,
+            project.export_human_update(
+                Path(args.output),
+                scope=args.scope,
+                tags=args.tag,
+                stages=args.stage,
+                entity_ids=args.entity_id,
+                include_archived=args.include_archived,
+            ),
+        )
     if args.command == "recommend":
         return dispatch_recommend(project, args, argv)
     if args.command == "report":
@@ -523,7 +539,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles survey list/show/copy/run/export-edsl",
                 "niles intake export/register/import/status/close/review",
                 "niles status-request export/register/import/status/review",
-                "niles human-update --output <update-job.ep>",
+                "niles human-update [--scope pipeline|people|organizations|all] [--tag t] [--stage s] [--entity-id id] [--include-archived] --output <update-job.ep>",
                 "niles recommend export/import/review/accept/reject",
                 "niles report status --html <path>",
                 "niles enrich ingest",
@@ -535,7 +551,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
             "managed_handoffs": {
                 "intake": ["niles intake export", "run data.publish_command", "niles intake register", "run data.pull_command", "niles intake import", "niles intake review"],
                 "status_request": ["niles status-request export", "run data.publish_command", "niles status-request register", "run data.pull_command", "niles status-request import", "niles status-request review"],
-                "human_update": ["niles human-update --output update-job.ep", "run data.publish_command"],
+                "human_update": ["niles human-update --scope pipeline --output update-job.ep", "run data.publish_command"],
                 "recommendation": ["niles recommend export", "run data.run_command", "niles recommend import", "niles recommend review"],
             },
         },

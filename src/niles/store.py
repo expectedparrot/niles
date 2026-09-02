@@ -1125,9 +1125,10 @@ class Project:
             contact["tasks"] = self.list_tasks(contact_ref=contact["id"])
         return contact
 
-    def list_contacts(self, tag: str | None = None, stale: bool = False) -> list[dict[str, Any]]:
+    def list_contacts(self, tag: str | None = None, stale: bool = False, include_archived: bool = False) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("select * from contacts where archived = 0 order by name").fetchall()
+            query = "select * from contacts" + ("" if include_archived else " where archived = 0") + " order by name"
+            rows = conn.execute(query).fetchall()
             contacts = [self._contact_from_row(row) for row in rows]
             for contact in contacts:
                 last = conn.execute(
@@ -1663,8 +1664,16 @@ class Project:
         self.exchange_dir.mkdir(parents=True, exist_ok=True)
         return self.exchange_dir / filename
 
-    def export_human_update(self, output: Path) -> dict[str, Any]:
-        """Build an offline EDSL survey that asks for updates on every entity."""
+    def export_human_update(
+        self,
+        output: Path,
+        scope: str = "pipeline",
+        tags: list[str] | None = None,
+        stages: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+        include_archived: bool = False,
+    ) -> dict[str, Any]:
+        """Build an offline EDSL survey for a filtered CRM entity scope."""
         try:
             from edsl import QuestionCheckBox, QuestionFreeText, QuestionMatrix, Survey
         except ImportError as exc:
@@ -1673,15 +1682,68 @@ class Project:
                 "Human update export requires the optional edsl dependency. Install niles[edsl].",
             ) from exc
 
-        contacts = sorted(self.list_contacts(), key=lambda item: item["name"].casefold())
+        requested_tags = {tag.casefold() for tag in (tags or [])}
+        requested_stages = {stage.casefold() for stage in (stages or [])}
+        requested_ids = set(entity_ids or [])
+        pipeline_tags = {"prospect", "target", "lead", "customer", "client"}
+
+        def entity_kind(contact: dict[str, Any]) -> str:
+            declared = str(contact.get("traits", {}).get("entity_type") or "").strip().casefold()
+            contact_tags = {str(tag).strip().casefold() for tag in contact.get("tags", [])}
+            if declared in {"person", "individual"} or contact_tags & {"person", "individual"} or contact.get("company"):
+                return "person"
+            if declared in {"organization", "organisation", "company", "account"} or contact_tags & {"organization", "organisation", "company", "account"} or contact_tags & pipeline_tags or contact.get("traits", {}).get("stage"):
+                return "organization"
+            return "ambiguous"
+
+        def contact_stage(contact: dict[str, Any]) -> str:
+            explicit = contact.get("traits", {}).get("stage")
+            if explicit:
+                return str(explicit).casefold()
+            contact_tags = {str(tag).casefold() for tag in contact.get("tags", [])}
+            return next((value for value in ("target", "engaged", "demo", "pilot", "contracting", "won", "stalled", "lost") if value in contact_tags), "unspecified")
+
+        def in_scope(contact: dict[str, Any]) -> bool:
+            kind = entity_kind(contact)
+            if scope == "people" and kind != "person":
+                return False
+            if scope == "organizations" and kind != "organization":
+                return False
+            if scope == "pipeline" and not (kind == "organization" and (contact_stage(contact) != "unspecified" or {str(tag).casefold() for tag in contact.get("tags", [])} & pipeline_tags)):
+                return False
+            contact_tags = {str(tag).casefold() for tag in contact.get("tags", [])}
+            if requested_tags and not requested_tags.issubset(contact_tags):
+                return False
+            if requested_stages and contact_stage(contact) not in requested_stages:
+                return False
+            return not requested_ids or contact["id"] in requested_ids
+
+        available = self.list_contacts(include_archived=include_archived)
+        unknown_ids = sorted(requested_ids - {contact["id"] for contact in available})
+        if unknown_ids:
+            raise NilesError("unknown_entity_ids", "Some requested entity IDs were not available in this scope.", {"entity_ids": unknown_ids, "include_archived": include_archived})
+        contacts = sorted((contact for contact in available if in_scope(contact)), key=lambda item: item["name"].casefold())
         if not contacts:
-            raise NilesError("no_entities", "Add at least one contact or organization before exporting a human update.")
+            raise NilesError("no_entities", "No entities matched the requested human-update scope and filters.", {"scope": scope, "tags": sorted(requested_tags), "stages": sorted(requested_stages), "entity_ids": sorted(requested_ids), "include_archived": include_archived})
+
+        if scope == "pipeline":
+            disposition_options = ["Current", "Follow up", "Waiting on them", "Waiting on us", "Stalled", "Won", "Lost / dead"]
+            action_options = ["Send follow-up", "Schedule meeting or demo", "Make introduction", "Prepare materials or proposal", "Review contract", "Other"]
+        elif scope == "people":
+            disposition_options = ["Current", "Follow up", "Waiting on them", "Waiting on us", "Reconnect", "Dormant", "Archive"]
+            action_options = ["Send follow-up", "Schedule conversation", "Make introduction", "Share material", "Update affiliation or role", "Other"]
+        else:
+            disposition_options = ["Current", "Follow up", "Waiting on them", "Waiting on us", "Needs attention", "Active", "Inactive"]
+            action_options = ["Send follow-up", "Schedule conversation", "Make introduction", "Prepare materials", "Review relationship", "Other"]
 
         row_labels: dict[str, str] = {}
         status_lines = []
+        latest_notes: dict[str, dict[str, Any]] = {}
+        for note in self.list_notes():
+            latest_notes.setdefault(note["contact_id"], note)
         for contact in contacts:
-            notes = self.list_notes(contact["id"], limit=1)
-            status = str(contact.get("traits", {}).get("current_status") or (notes[0]["text"] if notes else "No status recorded"))
+            latest_note = latest_notes.get(contact["id"])
+            status = str(contact.get("traits", {}).get("current_status") or (latest_note["text"] if latest_note else "No status recorded"))
             row_label = contact["name"]
             if row_label in row_labels:
                 row_label = f"{row_label} ({contact['id'][-6:]})"
@@ -1695,7 +1757,7 @@ class Project:
                 "Current CRM status:\n" + "\n".join(status_lines)
             ),
             question_items=list(row_labels),
-            question_options=["Current", "Follow up", "Waiting on them", "Waiting on us", "Stalled", "Won", "Lost / dead"],
+            question_options=disposition_options,
             include_comment=False,
         )
         questions = [triage]
@@ -1711,7 +1773,7 @@ class Project:
             actions = QuestionCheckBox(
                 question_name=actions_name,
                 question_text=f"What should we do for {contact['name']}? Select all that apply.",
-                question_options=["Send follow-up", "Schedule meeting or demo", "Make introduction", "Prepare materials or proposal", "Review contract", "Other"],
+                question_options=action_options,
                 min_selections=1,
                 include_comment=False,
             )
@@ -1734,7 +1796,8 @@ class Project:
             prefix = contact["id"].replace("-", "_")
             row_label = labels_by_id[contact["id"]]
             current = f"{{{{ entity_disposition.answer }}}}[{row_label!r}] == 'Current'"
-            terminal = f"{{{{ entity_disposition.answer }}}}[{row_label!r}] in ['Current', 'Won', 'Lost / dead']"
+            terminal_values = ["Current", *( ["Won", "Lost / dead"] if scope == "pipeline" else (["Archive"] if scope == "people" else ["Inactive"]) )]
+            terminal = f"{{{{ entity_disposition.answer }}}}[{row_label!r}] in {terminal_values!r}"
             for field in (f"actions_{prefix}", f"next_action_{prefix}", f"owner_{prefix}", f"due_{prefix}"):
                 survey = survey.add_skip_rule(field, terminal)
             survey = survey.add_skip_rule(f"notes_{prefix}", current)
@@ -1747,6 +1810,8 @@ class Project:
             "schema_version": "niles.human-update.v1",
             "survey_path": str(path),
             "entities": len(contacts),
+            "scope": scope,
+            "filters": {"tags": sorted(requested_tags), "stages": sorted(requested_stages), "entity_ids": sorted(requested_ids), "include_archived": include_archived},
             "disposition_question": "entity_disposition",
             "disposition_rows": row_labels,
             "routing": routing,
@@ -1758,6 +1823,8 @@ class Project:
             "manifest_path": str(manifest_path),
             "entities": len(contacts),
             "question_count": len(questions),
+            "scope": scope,
+            "filters": manifest["filters"],
             "network": False,
             "publish_command": publish_command,
             "next_command": publish_command,

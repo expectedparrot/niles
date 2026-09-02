@@ -901,7 +901,7 @@ def test_human_update_exports_all_entities_with_current_status_and_skip_logic(tm
     assert run_niles(tmp_path, "note", "add", second["id"], "Waiting for a callback", "--at", "2026-09-01")[0] == 0
 
     output = tmp_path / "update_job.ep"
-    code, payload = run_niles(tmp_path, "human-update", "--output", str(output))
+    code, payload = run_niles(tmp_path, "human-update", "--scope", "all", "--output", str(output))
     if not importlib.util.find_spec("edsl"):
         assert code == 1
         assert payload["errors"][0]["code"] == "edsl_not_installed"
@@ -910,6 +910,8 @@ def test_human_update_exports_all_entities_with_current_status_and_skip_logic(tm
     assert code == 0
     data = payload["data"]
     assert data["entities"] == 2
+    assert data["scope"] == "all"
+    assert data["filters"] == {"entity_ids": [], "include_archived": False, "stages": [], "tags": []}
     assert data["question_count"] == 11
     assert data["network"] is False
     assert data["publish_command"].startswith("ep humanize create --survey")
@@ -923,7 +925,7 @@ def test_human_update_exports_all_entities_with_current_status_and_skip_logic(tm
 
     survey = Survey.load(str(output))
     assert survey.questions[0].question_type == "matrix"
-    assert survey.questions[0].question_options == ["Current", "Follow up", "Waiting on them", "Waiting on us", "Stalled", "Won", "Lost / dead"]
+    assert survey.questions[0].question_options == ["Current", "Follow up", "Waiting on them", "Waiting on us", "Needs attention", "Active", "Inactive"]
     texts = [question.question_text for question in survey.questions]
     assert any("Burns Industries" in text and "Contract is with Mr. Burns" in text for text in texts)
     assert any("Waylon Smithers" in text and "Waiting for a callback" in text for text in texts)
@@ -936,6 +938,48 @@ def test_human_update_exports_all_entities_with_current_status_and_skip_logic(tm
     assert survey.next_question("entity_disposition", {"entity_disposition.answer": second_follow_up}).question_name == f"actions_{second['id'].replace('-', '_')}"
     follow_up_answers = {**current_answers, next(label for label, contact_id in rows.items() if contact_id == first["id"]): "Follow up"}
     assert survey.next_question("entity_disposition", {"entity_disposition.answer": follow_up_answers}).question_name == f"actions_{first['id'].replace('-', '_')}"
+
+
+def test_human_update_scopes_filters_and_archived_entities(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+
+    def add(name, *args):
+        return run_niles(tmp_path, "contact", "add", name, *args)[1]["data"]["contact"]
+
+    contract = add("Burns Industries", "--tag", "company", "--tag", "prospect", "--tag", "hot", "--trait", "stage=contracting")
+    target = add("Krusty Burger", "--tag", "company", "--tag", "target")
+    organization = add("Springfield Mall", "--tag", "company")
+    person = add("Waylon Smithers", "--tag", "person", "--company", "Burns Industries")
+    network = add("Moe Szyslak", "--tag", "person")
+    ambiguous = add("Mystery Record")
+    archived = add("Monorail Inc", "--tag", "company", "--trait", "stage=stalled")
+    assert run_niles(tmp_path, "contact", "archive", archived["id"])[0] == 0
+
+    def exported(name, *args):
+        code, payload = run_niles(tmp_path, "human-update", *args, "--output", str(tmp_path / f"{name}.ep"))
+        assert code == 0
+        data = payload["data"]
+        manifest = json.loads(Path(data["manifest_path"]).read_text(encoding="utf-8"))
+        return data, set(manifest["disposition_rows"].values())
+
+    pipeline_data, pipeline_ids = exported("pipeline")
+    assert pipeline_data["scope"] == "pipeline"
+    assert pipeline_ids == {contract["id"], target["id"]}
+    people_data, people_ids = exported("people", "--scope", "people")
+    assert people_data["scope"] == "people"
+    assert people_ids == {person["id"], network["id"]}
+    _, organization_ids = exported("organizations", "--scope", "organizations")
+    assert organization_ids == {contract["id"], target["id"], organization["id"]}
+    _, all_ids = exported("all", "--scope", "all")
+    assert all_ids == {contract["id"], target["id"], organization["id"], person["id"], network["id"], ambiguous["id"]}
+    filtered_data, filtered_ids = exported("filtered", "--scope", "organizations", "--tag", "prospect", "--tag", "hot", "--stage", "contracting", "--stage", "pilot")
+    assert filtered_ids == {contract["id"]}
+    assert filtered_data["filters"]["tags"] == ["hot", "prospect"]
+    assert filtered_data["filters"]["stages"] == ["contracting", "pilot"]
+    _, explicit_ids = exported("explicit", "--scope", "all", "--entity-id", ambiguous["id"])
+    assert explicit_ids == {ambiguous["id"]}
+    _, archived_ids = exported("archived", "--include-archived")
+    assert archived_ids == {contract["id"], target["id"], archived["id"]}
 
 
 def test_human_update_requires_entities(tmp_path):

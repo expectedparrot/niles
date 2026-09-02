@@ -15,8 +15,9 @@
 - For intake and status requests, use Niles `export`, run the returned
   `publish_command`, use Niles `register`, run the returned `pull_command`, and
   use Niles `import` followed by `review`.
-- For a single all-entity status pass, use `niles human-update --output
-  update_job.ep`, then run the returned `publish_command` with EP.
+- For a pipeline status pass, use `niles human-update --output update_job.ep`;
+  select `--scope people|organizations|all` or filters when needed, then run the
+  returned `publish_command` with EP.
 - For recommendations, use Niles `recommend export`, run the returned
   `run_command`, and use `recommend import` followed by `recommend review`.
 - Let Niles manage handoff paths. Explicit path arguments are advanced
