@@ -133,7 +133,7 @@
     <pre class="command" data-command="fsck" data-result='{"valid":true,"events":12,"errors":[],"counts":{"contacts":2,"open_tasks":1}}'><code>niles fsck</code></pre>
   </section>
 
-  <section id="sync"><h2><span class="chapter">12</span> Sync and restore without bookkeeping</h2><p>Preview exactly what Niles would commit and push:</p>
+  <section id="sync"><h2><span class="chapter">12</span> Sync and restore without bookkeeping</h2><p>Each sync refreshes a human-readable CRM view in the repository README while preserving content outside Niles' marked section. Preview exactly what Niles would commit and push:</p>
     <pre class="command" data-command="sync" data-result='{"dry_run":true,"changes":["durable CRM updates"],"committed":false,"pushed":false}'><code>niles sync --dry-run</code></pre>
     <p>Commit durable CRM state and push it:</p>
     <pre class="command" data-command="sync" data-result='{"committed":true,"commit":"abc1234","pushed":true,"excluded":["rebuildable index","managed exchange files"]}'><code>niles sync --message "Update Hutz Law CRM"</code></pre>

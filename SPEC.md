@@ -47,6 +47,8 @@ Follow bewley's conventions unless a CRM-specific reason forces a deviation:
   pulling the repository plus `niles rebuild-index` recreates the local binary
   projection. `niles sync` owns the safe durable path list, commits only those
   paths, and optionally pushes; it never stages unrelated working-tree files.
+  Sync also maintains a deterministic human-readable projection inside marked
+  sections of the root `README.md`, preserving content outside those markers.
 - **Agent-first output contract.** Every command emits exactly one versioned
   JSON envelope to stdout: `schema_version`, `status` (`ok`/`error`),
   `command`, `argv`, `data`, `warnings`, `errors`, `next_steps`. Failures

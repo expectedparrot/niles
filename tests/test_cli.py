@@ -62,16 +62,51 @@ def test_sync_stages_only_durable_niles_state(tmp_path):
     assert code == 0
     assert payload["data"]["committed"] is True
     assert payload["data"]["pushed"] is False
+    assert payload["data"]["readme_projection"]["changed"] is True
     tracked = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout.splitlines()
+    assert "README.md" in tracked
     assert ".niles/manifest.json" in tracked
     assert any(path.startswith(".niles/events/") for path in tracked)
     assert not any(path.startswith(".niles/index/") for path in tracked)
     assert "unrelated.txt" not in tracked
     assert "A  unrelated.txt" in subprocess.run(["git", "status", "--short"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "## Active pipeline" in readme
+    assert "No active accounts" in readme
+    assert "Burns Industries: entity type is ambiguous" in readme
 
     code, payload = run_niles(tmp_path, "sync", "--no-push")
     assert code == 0
     assert payload["data"]["committed"] is False
+
+
+def test_sync_readme_projection_preserves_user_content_and_refreshes(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Lionel Hutz"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "hutz@example.com"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("# Hutz Law\n\nCall 1-800-SUE-NOW.\n", encoding="utf-8")
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Burns Industries", "--tag", "company", "--trait", "stage=engaged")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Waylon Smithers", "--tag", "person", "--company", "Burns Industries", "--role", "Executive Assistant")[0] == 0
+    assert run_niles(tmp_path, "task", "add", "burns-industries", "Send retainer", "--assign", "Lionel", "--due", "2026-09-04")[0] == 0
+
+    code, payload = run_niles(tmp_path, "sync", "--no-push", "--message", "Publish CRM view")
+    assert code == 0
+    assert payload["data"]["readme_projection"]["changed"] is True
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert readme.startswith("# Hutz Law\n\nCall 1-800-SUE-NOW.")
+    assert readme.count("<!-- niles:projection:start -->") == 1
+    assert "| Burns Industries | engaged" in readme
+    assert "| Waylon Smithers | Burns Industries | Executive Assistant" in readme
+    assert "| Lionel | 2026-09-04 | Burns Industries | Send retainer |" in readme
+
+    assert run_niles(tmp_path, "contact", "status", "burns-industries", "Retainer sent")[0] == 0
+    code, payload = run_niles(tmp_path, "sync", "--no-push", "--message", "Refresh CRM view")
+    assert code == 0
+    refreshed = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert refreshed.count("<!-- niles:projection:start -->") == 1
+    assert "Call 1-800-SUE-NOW." in refreshed
+    assert "Retainer sent" in refreshed
 
 
 def test_sync_requires_project_at_git_root(tmp_path):

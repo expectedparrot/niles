@@ -462,6 +462,7 @@ class Project:
 
     def sync(self, message: str, push: bool = True, dry_run: bool = False) -> dict[str, Any]:
         durable_paths = [
+            "README.md",
             ".niles/manifest.json",
             ".niles/.gitignore",
             ".niles/config.toml",
@@ -485,6 +486,10 @@ class Project:
                 "The Niles project must be the git repository root for sync.",
                 {"project_root": str(self.root), "git_root": str(git_root)},
             )
+        projection = self.readme_projection()
+        projection_changed = not self.readme_path.exists() or self.readme_path.read_text(encoding="utf-8") != projection
+        if not dry_run and projection_changed:
+            self.readme_path.write_text(projection, encoding="utf-8")
         status = subprocess.run(
             ["git", "status", "--short", "--", *durable_paths],
             cwd=self.root,
@@ -501,6 +506,7 @@ class Project:
             "changes": changes,
             "message": message,
             "push": push,
+            "readme_projection": {"path": str(self.readme_path), "changed": projection_changed},
         }
         if dry_run:
             return {**plan, "dry_run": True, "committed": False, "pushed": False}
@@ -551,6 +557,92 @@ class Project:
                 )
             pushed = True
         return {**plan, "dry_run": False, "committed": committed, "commit": commit_hash, "pushed": pushed}
+
+    @property
+    def readme_path(self) -> Path:
+        return self.root / "README.md"
+
+    def readme_projection(self) -> str:
+        """Return the deterministic, human-facing projection tracked by sync."""
+        contacts = self.list_contacts()
+        tasks = self.list_tasks(status="open")
+        notes_by_contact = {contact["id"]: self.list_notes(contact["id"]) for contact in contacts}
+        tasks_by_contact: dict[str, list[dict[str, Any]]] = {}
+        for task in tasks:
+            tasks_by_contact.setdefault(task.get("contact_id") or "", []).append(task)
+
+        def cell(value: Any) -> str:
+            text = str(value if value not in (None, "") else "—")
+            return text.replace("|", "\\|").replace("\n", " ")
+
+        def kind(contact: dict[str, Any]) -> str:
+            traits = contact.get("traits", {})
+            declared = str(traits.get("entity_type") or "").lower()
+            tags = {str(tag).lower() for tag in contact.get("tags", [])}
+            if declared in {"person", "individual"} or tags & {"person", "individual"} or contact.get("company"):
+                return "person"
+            if declared in {"organization", "organisation", "company", "account"} or tags & {"organization", "organisation", "company", "account", "prospect", "target", "lead", "customer", "client", "lost", "dead"} or traits.get("stage"):
+                return "organization"
+            return "ambiguous"
+
+        def stage(contact: dict[str, Any]) -> str:
+            tags = {str(tag).lower() for tag in contact.get("tags", [])}
+            return str(contact.get("traits", {}).get("stage") or next((item for item in ("target", "engaged", "demo", "pilot", "contracting", "won", "stalled", "lost") if item in tags), "unspecified"))
+
+        def current_status(contact: dict[str, Any]) -> str:
+            explicit = contact.get("traits", {}).get("current_status")
+            notes = notes_by_contact.get(contact["id"], [])
+            return str(explicit or (notes[0]["text"] if notes else "No status recorded"))
+
+        organizations = [item for item in contacts if kind(item) == "organization"]
+        people = [item for item in contacts if kind(item) == "person"]
+        ambiguous = [item for item in contacts if kind(item) == "ambiguous"]
+        active = [item for item in organizations if stage(item) not in {"won", "lost"} and not ({"lost", "dead"} & {str(tag).lower() for tag in item.get("tags", [])})]
+        active.sort(key=lambda item: (stage(item), item["name"].lower()))
+
+        pipeline_rows = []
+        for account in active:
+            next_task = (tasks_by_contact.get(account["id"]) or [None])[0]
+            pipeline_rows.append(
+                f"| {cell(account['name'])} | {cell(stage(account))} | {cell(account.get('traits', {}).get('priority'))} | {cell(current_status(account))} | {cell(next_task.get('text') if next_task else None)} | {cell(next_task.get('assignee') if next_task else None)} | {cell(next_task.get('due_date') if next_task else None)} |"
+            )
+        relationship_rows = [
+            f"| {cell(person['name'])} | {cell(person.get('company'))} | {cell(person.get('role') or ', '.join(person.get('tags', [])))} | {cell(current_status(person))} |"
+            for person in sorted(people, key=lambda item: item["name"].lower())
+        ]
+        action_rows = [
+            f"| {cell(task.get('assignee'))} | {cell(task.get('due_date'))} | {cell(task.get('contact'))} | {cell(task['text'])} |"
+            for task in tasks
+        ]
+        warnings = [f"- {cell(item['name'])}: entity type is ambiguous; tag as `person` or `company`." for item in ambiguous]
+        org = self.get_org_context()
+        title = org.get("name") or "CRM"
+        managed = (
+            "<!-- niles:projection:start -->\n"
+            "> This section is generated by `niles sync`. Update CRM data with `niles` commands; do not edit it by hand.\n\n"
+            f"**{len(active)} active accounts · {len(people)} people · {len(tasks)} open actions**\n\n"
+            "## Active pipeline\n\n| Account | Stage | Priority | Current status | Next action | Owner | Due |\n|---|---|---:|---|---|---|---|\n"
+            + ("\n".join(pipeline_rows) or "| — | — | — | No active accounts | — | — | — |")
+            + "\n\n## Actions\n\n| Owner | Due | Account | Action |\n|---|---|---|---|\n"
+            + ("\n".join(action_rows) or "| — | — | — | No open actions |")
+            + "\n\n## Relationship network\n\n| Person | Organization | Role | Current status |\n|---|---|---|---|\n"
+            + ("\n".join(relationship_rows) or "| — | — | — | No people recorded |")
+            + "\n\n## Data quality\n\n"
+            + ("\n".join(warnings) or "- No ambiguous entity types detected.")
+            + "\n<!-- niles:projection:end -->\n"
+        )
+        if not self.readme_path.exists():
+            return f"# {title}\n\n{managed}"
+        existing = self.readme_path.read_text(encoding="utf-8")
+        start_marker = "<!-- niles:projection:start -->"
+        end_marker = "<!-- niles:projection:end -->"
+        start = existing.find(start_marker)
+        end = existing.find(end_marker)
+        if start >= 0 and end >= start:
+            end += len(end_marker)
+            return existing[:start] + managed.rstrip("\n") + existing[end:]
+        separator = "" if not existing or existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+        return existing + separator + managed
 
     def fsck(self) -> dict[str, Any]:
         errors: list[dict[str, Any]] = []

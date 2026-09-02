@@ -538,9 +538,17 @@ niles sync --dry-run
 niles sync --message "Update Hutz Law CRM"
 ```
 
-`niles sync` stages only durable CRM state. It never stages the rebuildable
-index, managed EP exchange files, or unrelated working-tree files. It commits
-the durable paths and runs `git push`.
+`niles sync` regenerates a human-readable CRM projection in the repository's
+`README.md`, then stages it with the durable CRM state. The projection shows
+the active pipeline, actions, relationship network, and data-quality warnings.
+If the README already contains user-written material, Niles preserves it and
+owns only the section between `<!-- niles:projection:start -->` and
+`<!-- niles:projection:end -->`.
+
+Niles never stages the rebuildable index, managed EP exchange files, or
+unrelated working-tree files. It commits the durable paths and runs `git push`.
+Do not edit the generated README section directly; change the CRM through
+Niles and sync again.
 
 To create a local commit without pushing:
 
