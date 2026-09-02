@@ -31,9 +31,9 @@ python -c "import edsl; print(edsl.__version__)"
 ep --help
 ```
 
-Remote Expected Parrot operations require `EXPECTED_PARROT_API_KEY` in the
-environment. Never put API keys in CRM notes, events, answer files, examples,
-or git history. Core CRM operations are offline.
+The `ep` commands that publish or retrieve Expected Parrot data require
+`EXPECTED_PARROT_API_KEY`. Niles itself never authenticates with Expected
+Parrot or makes network calls. Never put API keys in CRM state or git history.
 
 ## Quick start: Hutz opens his CRM
 
@@ -141,6 +141,10 @@ Recommendation states are `pending`, `accepted`, or `rejected`. Pulling or
 importing data never mutates relationships; explicit review is the mutation gate.
 
 ## Storage and events
+
+This is an implementation detail: normal use should go through `niles`
+commands, including `niles sync`. You do not need to inspect, stage, or name
+anything in this directory.
 
 ```text
 .niles/
@@ -376,9 +380,23 @@ Without `--answers`, `survey run` returns the definition and
 
 ## Human intake
 
+The EP boundary is strict: Niles exports and records; `ep` publishes and pulls.
+First export an EDSL survey without making a network request, then let `ep`
+humanize it:
+
 ```bash
-niles intake publish intake-basic
-niles intake pull <form-id>
+niles intake export intake-basic
+# Run the publish_command returned above.
+niles intake register intake-basic
+```
+
+`register` records the UUID and URLs returned by EP. It does not contact EP.
+Niles manages the exchange files and returns the exact EP command at each
+boundary. Use the returned local form ID to connect later response imports:
+
+```bash
+# Run the pull_command returned by register.
+niles intake import <local-form-id>
 niles intake status
 niles intake review
 
@@ -387,17 +405,13 @@ niles intake review <submission-id> --merge burns-industries
 niles intake review <submission-id> --reject --note "Prank call from Bart"
 ```
 
-Publishing returns local and remote IDs plus respondent/admin URLs. Pulling is
-quarantined and deduplicated. Acceptance creates a client and applies allowed
-routes; merge attaches the routed information to an existing client; rejection
-preserves the audit record without changing relationships.
+Imports accept EDSL Results `.ep` files or Results JSON. They are quarantined
+and deduplicated. Acceptance creates a client and applies allowed routes; merge
+attaches routed information to an existing client; rejection preserves the
+audit record without changing relationships.
 
-Downloaded Results JSON can use the same path:
-
-```bash
-niles intake pull <form-id> --from-file downloaded-responses.json
-niles intake close <form-id>
-```
+Use an explicit response path only when importing a file obtained elsewhere:
+`niles intake import <local-form-id> downloaded-responses.json`.
 
 Intake surveys cannot archive contacts or set protected fields. Close currently
 closes the local registration; the remote API lacks non-destructive close, so
@@ -406,9 +420,12 @@ the envelope reports `remote_closed: false` (Coopr issue #3950).
 ## Client status requests
 
 ```bash
-niles status-request publish client-debrief \
+niles status-request export client-debrief
+# Run the returned publish_command.
+niles status-request register client-debrief \
   --contact burns-industries --recipient smithers@burns.example
-niles status-request pull <form-id>
+# Run the returned pull_command.
+niles status-request import <local-form-id>
 niles status-request status
 niles status-request review
 niles status-request review <submission-id> --accept
@@ -416,18 +433,17 @@ niles status-request review <submission-id> --reject --note "Unverified update"
 ```
 
 Accepted answers use deterministic survey routing. Rejected answers remain in
-history and cause no CRM mutation.
+history and cause no CRM mutation. As with intake, Niles performs no publishing,
+pulling, authentication, or other network activity.
 
 ## Recommendation jobs
 
 Niles prepares EDSL jobs but never runs models itself:
 
 ```bash
-niles recommend export next-steps --tag prospect \
-  --output .niles/jobs/hutz-next-steps.ep
-ep run .niles/jobs/hutz-next-steps.ep \
-  --output .niles/results/hutz-next-steps.ep
-niles recommend import .niles/results/hutz-next-steps.ep
+niles recommend export next-steps --tag prospect
+# Run the returned run_command.
+niles recommend import --name next-steps
 niles recommend review
 niles recommend accept <recommendation-id> --assign lionel --due 2026-09-10
 niles recommend reject <recommendation-id>
@@ -438,16 +454,28 @@ preserves the source results path and review provenance.
 
 ## Moving and syncing a CRM
 
-Git provides sync and provenance:
+Git provides sync and provenance, but Niles owns the durable-state path list.
+Initialize the project as a git repository once, then use `niles sync`:
 
 ```bash
-git add .niles/manifest.json .niles/.gitignore .niles/config.toml \
-  .niles/events .niles/surveys .niles/reports
-git commit -m "Update Hutz Law CRM"
-git push
+git init
+git remote add origin git@github.com:example/hutz-law-crm.git
+niles sync --dry-run
+niles sync --message "Update Hutz Law CRM"
 ```
 
-Do not commit `.niles/index/`.
+`niles sync` stages only durable CRM state. It never stages the rebuildable
+index, managed EP exchange files, or unrelated working-tree files. It commits
+the durable paths and runs `git push`.
+
+To create a local commit without pushing:
+
+```bash
+niles sync --no-push --message "Checkpoint Hutz Law CRM"
+```
+
+If there are no new durable changes, no commit is created. Push failures are
+reported as structured errors and include the locally created commit ID.
 
 Portable ZIP archives contain durable state and exclude SQLite:
 

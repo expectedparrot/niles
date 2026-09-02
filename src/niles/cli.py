@@ -41,6 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init")
     sub.add_parser("status")
+    sync = sub.add_parser("sync")
+    sync.add_argument("--message", default="Update Niles CRM")
+    sync.add_argument("--no-push", action="store_true")
+    sync.add_argument("--dry-run", action="store_true")
     sub.add_parser("rebuild-index")
     sub.add_parser("fsck")
     export_parser = sub.add_parser("export")
@@ -206,11 +210,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     intake = sub.add_parser("intake")
     intake_sub = intake.add_subparsers(dest="intake_command", required=True)
-    intake_publish = intake_sub.add_parser("publish")
-    intake_publish.add_argument("survey")
-    intake_pull = intake_sub.add_parser("pull")
-    intake_pull.add_argument("form_id")
-    intake_pull.add_argument("--from-file")
+    intake_export = intake_sub.add_parser("export")
+    intake_export.add_argument("survey")
+    intake_export.add_argument("--output")
+    intake_register = intake_sub.add_parser("register")
+    intake_register.add_argument("survey")
+    intake_register.add_argument("registration", nargs="?")
+    intake_import = intake_sub.add_parser("import")
+    intake_import.add_argument("form_id")
+    intake_import.add_argument("responses", nargs="?")
     intake_sub.add_parser("status")
     intake_close = intake_sub.add_parser("close")
     intake_close.add_argument("form_id")
@@ -224,13 +232,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_request = sub.add_parser("status-request")
     status_sub = status_request.add_subparsers(dest="status_request_command", required=True)
-    status_publish = status_sub.add_parser("publish")
-    status_publish.add_argument("survey")
-    status_publish.add_argument("--contact", required=True)
-    status_publish.add_argument("--recipient", required=True)
-    status_pull = status_sub.add_parser("pull")
-    status_pull.add_argument("form_id")
-    status_pull.add_argument("--from-file")
+    status_export = status_sub.add_parser("export")
+    status_export.add_argument("survey")
+    status_export.add_argument("--output")
+    status_register = status_sub.add_parser("register")
+    status_register.add_argument("survey")
+    status_register.add_argument("registration", nargs="?")
+    status_register.add_argument("--contact", required=True)
+    status_register.add_argument("--recipient", required=True)
+    status_import = status_sub.add_parser("import")
+    status_import.add_argument("form_id")
+    status_import.add_argument("responses", nargs="?")
     status_sub.add_parser("status")
     status_review = status_sub.add_parser("review")
     status_review.add_argument("submission_id", nargs="?")
@@ -244,9 +256,10 @@ def build_parser() -> argparse.ArgumentParser:
     recommend_export = recommend_sub.add_parser("export")
     recommend_export.add_argument("name")
     recommend_export.add_argument("--tag")
-    recommend_export.add_argument("--output", required=True)
+    recommend_export.add_argument("--output")
     recommend_import = recommend_sub.add_parser("import")
-    recommend_import.add_argument("path")
+    recommend_import.add_argument("path", nargs="?")
+    recommend_import.add_argument("--name", default="next-steps")
     recommend_sub.add_parser("review")
     recommend_accept = recommend_sub.add_parser("accept")
     recommend_accept.add_argument("recommendation_id")
@@ -296,18 +309,7 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
             argv,
             {
                 "project_root": str(project.root),
-                "state_dir": ".niles",
-                "created": [
-                    ".niles/manifest.json",
-                    ".niles/.gitignore",
-                    ".niles/config.toml",
-                    ".niles/events/",
-                    ".niles/index/niles.sqlite",
-                    ".niles/surveys/",
-                    ".niles/reports/",
-                ],
-                "source_of_truth": ".niles/events/",
-                "derived": [".niles/index/niles.sqlite"],
+                "initialized": True,
             },
             next_steps=[
                 NextStep(
@@ -390,6 +392,9 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 )
             ],
         )
+    if args.command == "sync":
+        data = project.sync(message=args.message, push=not args.no_push, dry_run=args.dry_run)
+        return ok("sync", argv, data)
     if args.command == "history":
         return ok("history", argv, {"events": project.history(args.contact, args.limit)})
     if args.command == "undo":
@@ -488,6 +493,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
             "available_now": [
                 "niles init",
                 "niles status",
+                "niles sync",
                 "niles rebuild-index",
                 "niles fsck",
                 "niles contact add/show/list",
@@ -504,8 +510,8 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles import csv --commit",
                 "niles export csv|json",
                 "niles survey list/show/copy/run/export-edsl",
-                "niles intake publish/pull/status/close/review",
-                "niles status-request publish/pull/status/review",
+                "niles intake export/register/import/status/close/review",
+                "niles status-request export/register/import/status/review",
                 "niles recommend export/import/review/accept/reject",
                 "niles report status --html <path>",
                 "niles enrich ingest",
@@ -728,10 +734,12 @@ def dispatch_survey(project: Project, args: argparse.Namespace, argv: list[str])
 
 
 def dispatch_intake(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
-    if args.intake_command == "publish":
-        return ok("intake publish", argv, project.publish_form("intake", args.survey))
-    if args.intake_command == "pull":
-        return ok("intake pull", argv, project.pull_form(args.form_id, "intake", Path(args.from_file) if args.from_file else None))
+    if args.intake_command == "export":
+        return ok("intake export", argv, project.export_form("intake", args.survey, Path(args.output) if args.output else None))
+    if args.intake_command == "register":
+        return ok("intake register", argv, project.register_form("intake", args.survey, Path(args.registration) if args.registration else None))
+    if args.intake_command == "import":
+        return ok("intake import", argv, project.import_form(args.form_id, "intake", Path(args.responses) if args.responses else None))
     if args.intake_command == "status":
         return ok("intake status", argv, {"forms": project.list_forms("intake"), "pending": project.list_submissions("intake")})
     if args.intake_command == "close":
@@ -747,10 +755,12 @@ def dispatch_intake(project: Project, args: argparse.Namespace, argv: list[str])
 
 
 def dispatch_status_request(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
-    if args.status_request_command == "publish":
-        return ok("status-request publish", argv, project.publish_form("status-request", args.survey, args.contact, args.recipient))
-    if args.status_request_command == "pull":
-        return ok("status-request pull", argv, project.pull_form(args.form_id, "status-request", Path(args.from_file) if args.from_file else None))
+    if args.status_request_command == "export":
+        return ok("status-request export", argv, project.export_form("status-request", args.survey, Path(args.output) if args.output else None))
+    if args.status_request_command == "register":
+        return ok("status-request register", argv, project.register_form("status-request", args.survey, Path(args.registration) if args.registration else None, args.contact, args.recipient))
+    if args.status_request_command == "import":
+        return ok("status-request import", argv, project.import_form(args.form_id, "status-request", Path(args.responses) if args.responses else None))
     if args.status_request_command == "status":
         return ok("status-request status", argv, {"forms": project.list_forms("status-request"), "pending": project.list_submissions("status-request")})
     if args.status_request_command == "review":
@@ -765,9 +775,9 @@ def dispatch_status_request(project: Project, args: argparse.Namespace, argv: li
 
 def dispatch_recommend(project: Project, args: argparse.Namespace, argv: list[str]) -> Envelope:
     if args.recommend_command == "export":
-        return ok("recommend export", argv, project.export_recommendation_job(args.name, Path(args.output), args.tag))
+        return ok("recommend export", argv, project.export_recommendation_job(args.name, Path(args.output) if args.output else None, args.tag))
     if args.recommend_command == "import":
-        return ok("recommend import", argv, project.import_recommendations(Path(args.path)))
+        return ok("recommend import", argv, project.import_recommendations(Path(args.path) if args.path else None, name=args.name))
     if args.recommend_command == "review":
         return ok("recommend review", argv, {"pending": project.list_recommendations()})
     if args.recommend_command == "accept":

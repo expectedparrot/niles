@@ -4,10 +4,11 @@ import csv
 import hashlib
 import io
 import json
-import os
 import re
+import shlex
 import shutil
 import sqlite3
+import subprocess
 import tomllib
 import zipfile
 import uuid
@@ -111,6 +112,11 @@ class Project:
         return self.state_dir / "index" / "niles.sqlite"
 
     @property
+    def exchange_dir(self) -> Path:
+        """Private, disposable files used to hand work to and from EP."""
+        return self.state_dir / "exchange"
+
+    @property
     def manifest_path(self) -> Path:
         return self.state_dir / "manifest.json"
 
@@ -144,7 +150,7 @@ class Project:
             )
         niles_gitignore = project.state_dir / ".gitignore"
         if not niles_gitignore.exists():
-            niles_gitignore.write_text("index/\n", encoding="utf-8")
+            niles_gitignore.write_text("index/\nexchange/\n", encoding="utf-8")
         from .surveys import TEMPLATES, template_definition
 
         for survey_name in TEMPLATES:
@@ -449,6 +455,98 @@ class Project:
             "rebuilt": str(self.index_path),
             "counts": self.counts(),
         }
+
+    def sync(self, message: str, push: bool = True, dry_run: bool = False) -> dict[str, Any]:
+        durable_paths = [
+            ".niles/manifest.json",
+            ".niles/.gitignore",
+            ".niles/config.toml",
+            ".niles/events",
+            ".niles/surveys",
+            ".niles/reports",
+        ]
+        probe = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            raise NilesError("not_git_repository", "Niles sync requires a git repository.")
+        git_root = Path(probe.stdout.strip()).resolve()
+        if git_root != self.root:
+            raise NilesError(
+                "git_root_mismatch",
+                "The Niles project must be the git repository root for sync.",
+                {"project_root": str(self.root), "git_root": str(git_root)},
+            )
+        status = subprocess.run(
+            ["git", "status", "--short", "--", *durable_paths],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if status.returncode != 0:
+            raise NilesError("git_status_failed", status.stderr.strip() or "Could not inspect durable Niles state.")
+        changes = [line for line in status.stdout.splitlines() if line]
+        plan = {
+            "durable_paths": durable_paths,
+            "excluded": ["rebuildable index", "managed exchange files"],
+            "changes": changes,
+            "message": message,
+            "push": push,
+        }
+        if dry_run:
+            return {**plan, "dry_run": True, "committed": False, "pushed": False}
+        add = subprocess.run(
+            ["git", "add", "--", *durable_paths],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if add.returncode != 0:
+            raise NilesError("git_add_failed", add.stderr.strip() or "Could not stage durable Niles state.")
+        staged_names = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--", *durable_paths],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if staged_names.returncode != 0:
+            raise NilesError("git_diff_failed", "Could not inspect staged Niles state.")
+        staged_files = [line for line in staged_names.stdout.splitlines() if line]
+        committed = bool(staged_files)
+        commit_hash = None
+        if committed:
+            commit = subprocess.run(
+                ["git", "commit", "-m", message, "--", *staged_files],
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if commit.returncode != 0:
+                raise NilesError("git_commit_failed", commit.stderr.strip() or commit.stdout.strip())
+            commit_hash = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=self.root, text=True, capture_output=True, check=True
+            ).stdout.strip()
+        pushed = False
+        if push:
+            push_result = subprocess.run(
+                ["git", "push"], cwd=self.root, text=True, capture_output=True, check=False
+            )
+            if push_result.returncode != 0:
+                raise NilesError(
+                    "git_push_failed",
+                    push_result.stderr.strip() or push_result.stdout.strip(),
+                    {"committed": committed, "commit": commit_hash},
+                )
+            pushed = True
+        return {**plan, "dry_run": False, "committed": committed, "commit": commit_hash, "pushed": pushed}
 
     def fsck(self) -> dict[str, Any]:
         errors: list[dict[str, Any]] = []
@@ -1394,28 +1492,72 @@ class Project:
                 questions.append(QuestionFreeText(**kwargs))
         return Survey(questions=questions, name=definition["name"])
 
-    def publish_form(self, kind: str, survey_name: str, contact_ref: str | None = None, recipient: str | None = None) -> dict[str, Any]:
-        if not os.environ.get("EXPECTED_PARROT_API_KEY"):
-            raise NilesError("missing_ep_api_key", "Set EXPECTED_PARROT_API_KEY before publishing a humanized survey.")
+    def _exchange_path(self, filename: str) -> Path:
+        niles_gitignore = self.state_dir / ".gitignore"
+        ignored = niles_gitignore.read_text(encoding="utf-8") if niles_gitignore.exists() else ""
+        lines = ignored.splitlines()
+        if "exchange/" not in lines:
+            niles_gitignore.write_text(ignored + ("" if not ignored or ignored.endswith("\n") else "\n") + "exchange/\n", encoding="utf-8")
+        self.exchange_dir.mkdir(parents=True, exist_ok=True)
+        return self.exchange_dir / filename
+
+    def export_form(self, kind: str, survey_name: str, output: Path | None = None) -> dict[str, Any]:
         definition = self.get_survey(survey_name)
         if kind == "intake":
             forbidden = [route["action"] for route in definition.get("routes", {}).values() if route["action"] in {"archive", "set_field"}]
             if forbidden:
                 raise NilesError("unsafe_intake_route", "Intake surveys cannot archive contacts or set protected fields.")
-        contact = self.resolve_contact(contact_ref) if contact_ref else None
         survey = self._make_edsl_survey(definition)
+        managed = output is None
+        path = self._exchange_path(f"{slugify(kind)}-{slugify(survey_name)}.survey.ep") if managed else (output if output.is_absolute() else self.root / output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        survey.save(str(path))
+        registration_path = self._exchange_path(f"{slugify(kind)}-{slugify(survey_name)}.registration.json")
+        publish_command = (
+            f"ep humanize create --survey {shlex.quote(str(path))} "
+            f"--name {shlex.quote(f'Niles {kind}: {survey_name}')} > {shlex.quote(str(registration_path))}"
+        )
+        return {
+            "kind": kind,
+            "survey": survey_name,
+            "path": str(path),
+            "registration_path": str(registration_path),
+            "managed": managed,
+            "network": False,
+            "publish_command": publish_command,
+            "next_command": publish_command,
+        }
+
+    def register_form(
+        self,
+        kind: str,
+        survey_name: str,
+        registration_path: Path | None = None,
+        contact_ref: str | None = None,
+        recipient: str | None = None,
+    ) -> dict[str, Any]:
+        self.get_survey(survey_name)
+        contact = self.resolve_contact(contact_ref) if contact_ref else None
+        path = self._exchange_path(f"{slugify(kind)}-{slugify(survey_name)}.registration.json") if registration_path is None else (registration_path if registration_path.is_absolute() else self.root / registration_path)
         try:
-            details = dict(survey.humanize(human_survey_name=f"Niles {kind}: {survey_name}", survey_description=definition.get("description")))
-        except Exception as exc:  # Network/auth errors become stable Niles errors.
-            raise NilesError("humanize_failed", str(exc)) from exc
+            registration = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise NilesError("invalid_registration", f"Could not read EP registration: {path}") from exc
+        if registration.get("status") == "ok" and isinstance(registration.get("data"), dict):
+            registration = registration["data"]
+        remote_uuid = registration.get("human_survey_uuid") or registration.get("uuid")
+        if not remote_uuid:
+            raise NilesError("invalid_registration", "EP registration has no human survey UUID.")
         payload = {
             "id": new_id("form"), "kind": kind, "survey_name": survey_name,
-            "remote_uuid": str(details["uuid"]), "respondent_url": details.get("respondent_url"),
-            "admin_url": details.get("admin_url"), "contact_id": contact["id"] if contact else None,
+            "remote_uuid": str(remote_uuid), "respondent_url": registration.get("respondent_url"),
+            "admin_url": registration.get("admin_url"), "contact_id": contact["id"] if contact else None,
             "recipient": recipient, "created_at": utc_now(),
         }
         event = self.append_event("form_published", payload)
-        return {"form": payload, "remote": details, "events_written": 1, "event_id": event["event_id"]}
+        responses_path = self._exchange_path(f"{slugify(kind)}-{slugify(str(remote_uuid))}.responses.json")
+        pull_command = f"ep humanize responses {shlex.quote(str(remote_uuid))} --output {shlex.quote(str(responses_path))}"
+        return {"form": payload, "registration_path": str(path), "responses_path": str(responses_path), "pull_command": pull_command, "next_command": pull_command, "events_written": 1, "event_id": event["event_id"]}
 
     def list_forms(self, kind: str | None = None) -> list[dict[str, Any]]:
         query, params = "select * from forms", []
@@ -1432,25 +1574,18 @@ class Project:
             return matches[0]
         raise NilesError("unknown_form", f"No form matched '{ref}'.", {"ref": ref})
 
-    def pull_form(self, form_ref: str, kind: str, response_file: Path | None = None) -> dict[str, Any]:
+    def import_form(self, form_ref: str, kind: str, response_file: Path | None = None) -> dict[str, Any]:
         form = self.resolve_form(form_ref, kind)
-        if response_file:
-            path = response_file if response_file.is_absolute() else self.root / response_file
-            try:
+        path = self._exchange_path(f"{slugify(kind)}-{slugify(form['remote_uuid'])}.responses.json") if response_file is None else (response_file if response_file.is_absolute() else self.root / response_file)
+        try:
+            if path.suffix == ".ep":
+                from edsl import Results
+
+                raw = Results.load(str(path)).to_dict()
+            else:
                 raw = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise NilesError("invalid_responses", f"Could not read responses: {response_file}") from exc
-        else:
-            if not os.environ.get("EXPECTED_PARROT_API_KEY"):
-                raise NilesError("missing_ep_api_key", "Set EXPECTED_PARROT_API_KEY before pulling responses.")
-            try:
-                from edsl.coop import Coop
-                raw_object = Coop().get_human_survey_responses(form["remote_uuid"])
-                raw = raw_object.to_dict() if hasattr(raw_object, "to_dict") else raw_object
-            except ImportError as exc:
-                raise NilesError("edsl_not_installed", "Response pulling requires niles[edsl].") from exc
-            except Exception as exc:
-                raise NilesError("humanize_pull_failed", str(exc)) from exc
+        except Exception as exc:
+            raise NilesError("invalid_responses", f"Could not read EP responses: {path}") from exc
         records = raw.get("data", raw.get("responses", [])) if isinstance(raw, dict) else raw
         if not isinstance(records, list):
             raise NilesError("invalid_responses", "Responses must contain a data or responses list.")
@@ -1474,7 +1609,7 @@ class Project:
                 matched = row["id"] if row else None
             payload = {"id": new_id("sub"), "form_id": form["id"], "remote_id": remote_id, "answers": answers, "matched_contact_id": matched, "received_at": utc_now()}
             written.append(self.append_event("submission_received", payload)["event_id"])
-        return {"form": form, "received": len(written), "skipped": skipped, "event_ids": written, "quarantined": True}
+        return {"form": form, "responses_path": str(path), "received": len(written), "skipped": skipped, "event_ids": written, "quarantined": True, "network": False}
 
     def list_submissions(self, kind: str, status: str = "pending") -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -1514,7 +1649,7 @@ class Project:
         event = self.append_event("form_closed", {"id": form["id"], "created_at": utc_now()})
         return {"form_id": form["id"], "status": "closed", "remote_closed": False, "events_written": 1, "event_id": event["event_id"]}
 
-    def export_recommendation_job(self, name: str, output: Path, tag: str | None = None) -> dict[str, Any]:
+    def export_recommendation_job(self, name: str, output: Path | None = None, tag: str | None = None) -> dict[str, Any]:
         try:
             from edsl import QuestionFreeText, Scenario, ScenarioList, Survey
         except ImportError as exc:
@@ -1528,15 +1663,18 @@ class Project:
             QuestionFreeText(question_name="rationale", question_text="Briefly explain why this is the best next action for {{ name }}."),
         ]
         job = Survey(questions, name=name).by(ScenarioList([Scenario(item) for item in scenarios]))
-        path = output if output.is_absolute() else self.root / output
+        managed = output is None
+        path = self._exchange_path(f"recommend-{slugify(name)}.jobs.ep") if managed else (output if output.is_absolute() else self.root / output)
         path.parent.mkdir(parents=True, exist_ok=True)
         job.save(str(path))
         manifest = path.with_suffix(path.suffix + ".manifest.json")
         manifest.write_text(json.dumps({"schema_version": "niles.recommend-job.v1", "name": name, "job_path": str(path), "contact_ids": [item["contact_id"] for item in scenarios], "created_at": utc_now()}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        return {"path": str(path), "manifest": str(manifest), "contacts": len(scenarios), "run_command": f"ep run {path} --output <results-path>", "network": False}
+        results_path = self._exchange_path(f"recommend-{slugify(name)}.results.json")
+        run_command = f"ep run {shlex.quote(str(path))} --output {shlex.quote(str(results_path))}"
+        return {"path": str(path), "manifest": str(manifest), "results_path": str(results_path), "contacts": len(scenarios), "managed": managed, "run_command": run_command, "next_command": run_command, "network": False}
 
-    def import_recommendations(self, results_path: Path) -> dict[str, Any]:
-        path = results_path if results_path.is_absolute() else self.root / results_path
+    def import_recommendations(self, results_path: Path | None = None, name: str = "next-steps") -> dict[str, Any]:
+        path = self._exchange_path(f"recommend-{slugify(name)}.results.json") if results_path is None else (results_path if results_path.is_absolute() else self.root / results_path)
         try:
             if path.suffix == ".ep":
                 from edsl import Results

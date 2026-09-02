@@ -15,9 +15,9 @@ you are neglecting. It uses EDSL as its survey substrate in three ways:
 1. **Internal check-in surveys** — structured prompts the *user* answers in
    the terminal (post-interaction debriefs, periodic reviews) whose answers
    route directly into the data model.
-2. **Customer-facing intake forms** — the same Survey objects published via
-   EDSL's `humanize()` to collect submissions from third parties, which are
-   pulled, reviewed, and materialized as contacts.
+2. **Customer-facing intake forms** — niles exports Survey objects; `ep`
+   publishes them via `humanize()` and retrieves responses; niles registers
+   the returned metadata and imports reviewed results as contacts.
 3. **(v2) LLM operations** — enrichment, labeling, and summarization packaged
    as `.ep` EDSL job artifacts, following the bewley rule: niles *exports*
    jobs and *imports* audited results, but never executes model calls itself.
@@ -30,10 +30,10 @@ contacts → a review survey processes them.
 
 Follow bewley's conventions unless a CRM-specific reason forces a deviation:
 
-- **Local-first.** All durable state lives in a project directory under
-  `.niles/`. No server dependency for core operation. Network is used only
-  for explicitly-invoked intake/status-request publish/pull and v2 `.ep`
-  recommendation job execution via `ep`.
+- **Local-first and network-contained.** All durable state lives under
+  `.niles/`. Niles never authenticates with EP or makes network calls. It
+  exports artifacts and imports or registers files; the `ep` CLI exclusively
+  owns humanize publishing, response retrieval, and recommendation execution.
 - **Event log as source of truth.** `.niles/events/` is an append-only log of
   every mutation. `.niles/index/niles.sqlite` is a rebuildable projection
   (`niles rebuild-index`). `niles fsck` verifies integrity. `niles history` and
@@ -45,7 +45,8 @@ Follow bewley's conventions unless a CRM-specific reason forces a deviation:
   Commit durable `.niles/` files (`manifest.json`, `events/`, `surveys/`,
   material metadata, selected reports) and ignore `.niles/index/`. Cloning or
   pulling the repository plus `niles rebuild-index` recreates the local binary
-  projection.
+  projection. `niles sync` owns the safe durable path list, commits only those
+  paths, and optionally pushes; it never stages unrelated working-tree files.
 - **Agent-first output contract.** Every command emits exactly one versioned
   JSON envelope to stdout: `schema_version`, `status` (`ok`/`error`),
   `command`, `argv`, `data`, `warnings`, `errors`, `next_steps`. Failures
@@ -61,11 +62,10 @@ Follow bewley's conventions unless a CRM-specific reason forces a deviation:
   Intake results arrive in EDSL's Results format. Contacts export to
   `ScenarioList` (and, v2, to `AgentList`). Everything supports
   `to_dict`/`from_dict`.
-- **Delegated auth.** EDSL owns Expected Parrot authentication. Current EDSL
-  reads the EP key from `EXPECTED_PARROT_API_KEY` (typically via `.env`).
-  niles never stores, prints, or inspects keys; before any command that needs
-  the EP server, it checks that EDSL/Coop can authenticate and reports a
-  structured error with remediation steps if absent.
+- **Delegated auth and execution.** The `ep` CLI owns Expected Parrot
+  authentication and every network operation. Niles never reads, stores, or
+  checks EP keys. It only exports EDSL artifacts and imports or registers
+  local files produced by `ep`.
 - **Network is explicitly review-gated.** Humanize-powered intake and status
   requests can fetch data from people, but pulled records are quarantined
   until review. v2 recommendation jobs export `.ep` artifacts for `ep run`;
@@ -171,6 +171,7 @@ envelope; representative examples only — full flags via `--help`.
 ```
 niles init                                  # create project (.niles/)
 niles status                                # counts, stale contacts, pending intake/updates
+niles sync [--message m] [--no-push] [--dry-run]
 niles fsck                                  # verify manifest, event log, replay, projections
 niles rebuild-index                         # rebuild disposable sqlite projection
 niles guide | niles next | niles capabilities
@@ -214,13 +215,15 @@ niles survey list | show | copy | edit
 niles survey run <name> [--contact <ref>]   # interactive terminal Q&A → routed answers
 niles review [--stale]                      # sugar: survey run review over stale contacts
 
-niles intake publish <survey-name>          # humanize() → prints respondent + results links
-niles intake pull [<form-id>]               # fetch new submissions → pending queue
+niles intake export <survey-name> [--output <survey.ep>]
+niles intake register <survey-name> [<ep-registration.json>]
+niles intake import <form-id> [<responses.ep>] # import into pending queue
 niles intake review                         # triage: accept / edit / merge / reject
 niles intake status | close <form-id>
 
-niles status-request publish <survey-name> --contact <ref> --recipient <ref>
-niles status-request pull [<form-id>]       # fetch updates → pending queue
+niles status-request export <survey-name> [--output <survey.ep>]
+niles status-request register <survey-name> [<registration.json>] --contact <ref> --recipient <ref>
+niles status-request import <form-id> [<responses.ep>]
 niles status-request review                 # accept / edit / reject learned updates
 
 niles report pipeline | activity | neglect | tasks
@@ -274,29 +277,30 @@ Rules:
 
 ## 6. Intake via humanize
 
-### 6.1 Publish
+### 6.1 Export and register
 
-`niles intake publish <survey>`:
+`niles intake export <survey> [--output <survey.ep>]`:
 
-1. Verifies `ep` auth (structured error if absent).
-2. Calls `humanize()` on the Survey; records `form_id`, respondent URL, and
-   results URL in an event.
-3. Prints both links; `requires_approval: true` and `network: true` are set
-   on this step in any `next_steps` that suggest it.
+1. Validates intake routing restrictions.
+2. Writes an EDSL Survey artifact without network access. By default Niles
+   manages the exchange path; `--output` is an advanced override.
+3. Prints the exact `ep humanize create` command to run, including where its
+   registration output belongs.
+
+The user or agent runs `ep humanize create` and records its JSON output. Then
+`niles intake register <survey> [<registration.json>]` records the remote UUID,
+respondent URL, and admin URL in an event. Niles never reads EP credentials.
 
 The published form must include a purpose/consent line; the `intake-basic`
-template ships with one and `publish` warns if a custom survey lacks a
+template ships with one and export warns if a custom survey lacks a
 question or description tagged `consent`.
 
-### 6.2 Pull
+### 6.2 Retrieve and import
 
-`niles intake pull` fetches human responses for each open form using EDSL's
-`Coop.get_human_survey_responses(form_uuid)` and writes them to the pending
-queue. The happy path returns an EDSL `Results` object; niles must also handle
-EDSL's documented fallback shape, a `ScenarioList` of raw human-response
-records, without losing provenance. Pull-based only in v1 (no watch mode).
-Idempotent: re-pulling never duplicates submissions (response ids are the dedup
-key). The high-water mark is local niles state, not an EP guarantee.
+The user or agent runs the exact `pull_command` returned by registration.
+`niles intake import <form-id> [<responses.ep>]` reads the managed or explicit EDSL Results
+artifact and writes records to the pending queue. JSON Results are also
+accepted. Import is idempotent: repeated imports never duplicate submissions.
 
 ### 6.3 Review queue
 
@@ -317,9 +321,8 @@ key). The high-water mark is local niles state, not an EP guarantee.
   are no LLM calls in v1). v2 LLM features must treat `intake`-sourced text
   as data-only context and keep any job that reads it read-only or
   human-approved — this is the prompt-injection boundary.
-- Intake data transits and rests on the Expected Parrot server. README must
-  say this plainly; `niles intake publish` envelope includes a `warnings`
-  entry to the same effect.
+- Intake data transits and rests on the Expected Parrot server when the user
+  invokes `ep humanize`; Niles only stores imported local copies.
 - `niles contact delete --hard` plus `niles intake purge <submission-id>`
   provide genuine local erasure (logged as redaction events with content
   removed). Server-side deletion is out of niles's control; document the
@@ -332,20 +335,19 @@ known contact/account from a known respondent (often a teammate). They reuse the
 intake safety model but route into existing CRM records instead of creating new
 contacts by default.
 
-### 7.1 Publish
+### 7.1 Export and register
 
-`niles status-request publish <survey> --contact <ref> --recipient <ref>`:
+`niles status-request export <survey> [--output <survey.ep>]` writes the local
+artifact. After `ep humanize create`, the command:
 
-1. Verifies EDSL/Coop auth.
-2. Calls `humanize()` on the Survey; records `form_id`, respondent URL, admin
-   URL, target contact id, and recipient id in an event.
-3. Prints the links and privacy warning.
+`niles status-request register <survey> [<registration.json>] --contact <ref>
+--recipient <ref>` records the remote metadata, target contact, and recipient.
 
-### 7.2 Pull and review
+### 7.2 Import and review
 
-`niles status-request pull` fetches responses with
-`Coop.get_human_survey_responses(form_uuid)` and writes them to a pending
-status-update queue. Review shows raw answers and the exact routed mutations.
+After `ep humanize responses` retrieves an artifact, `niles status-request
+import <form-id> [<responses.ep>]` writes it to a pending status-update queue.
+Review shows raw answers and the exact routed mutations.
 Accepted updates may append notes, set traits, and create assigned tasks.
 Rejected updates remain in history but apply no CRM changes.
 
@@ -355,9 +357,9 @@ v2 recommendation features never execute model calls inside niles. The workflow
 is:
 
 ```
-niles recommend export next-steps --tag prospect --output .niles/jobs/foo.ep
-ep run .niles/jobs/foo.ep --output .niles/results/foo.results.json
-niles recommend import .niles/results/foo.results.json
+niles recommend export next-steps --tag prospect
+# run the returned run_command
+niles recommend import --name next-steps
 niles recommend accept <recommendation-id> --assign john --due 2026-09-03
 ```
 
@@ -465,8 +467,9 @@ tables, and `ContactList.filter/select/from_csv`. Mutations go through
   pipeline/activity/neglect/task reports.
 - **M3 — surveys + routing.** Survey storage, templates, terminal runner,
   routing vocabulary + dry-run, `niles review` loop.
-- **M4 — intake and status requests.** publish/pull/review/purge, dedup +
-  merge, consent warning, status-request review gate, EP auth delegation.
+- **M4 — intake and status requests.** export/register/import/review/purge,
+  dedup + merge, consent warning, status-request review gate, strict EP CLI
+  network boundary.
 - **M5 — polish.** Library API surface, `--human` rendering, docs in
   bewley's README shape (when-to-use / stretch cases / decision rule /
   worked examples / pitfalls), example dataset (`niles example fetch`).

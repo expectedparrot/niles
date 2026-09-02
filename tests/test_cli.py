@@ -36,12 +36,60 @@ def test_init_and_status(tmp_path, monkeypatch):
     manifest = json.loads((tmp_path / ".niles" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema_version"] == "niles.project.v1"
     assert manifest["storage"]["source_of_truth"] == ".niles/events/"
-    assert (tmp_path / ".niles" / ".gitignore").read_text(encoding="utf-8") == "index/\n"
+    assert (tmp_path / ".niles" / ".gitignore").read_text(encoding="utf-8") == "index/\nexchange/\n"
 
     code, payload = run_niles(tmp_path, "status")
     assert code == 0
     assert payload["data"]["contacts"] == 0
     assert payload["data"]["open_tasks"] == 0
+
+
+def test_sync_stages_only_durable_niles_state(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Lionel Hutz"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "hutz@example.com"], cwd=tmp_path, check=True)
+    assert run_niles(tmp_path, "init")[0] == 0
+    assert run_niles(tmp_path, "contact", "add", "Burns Industries")[0] == 0
+    (tmp_path / "unrelated.txt").write_text("do not stage me\n", encoding="utf-8")
+    subprocess.run(["git", "add", "unrelated.txt"], cwd=tmp_path, check=True)
+
+    code, payload = run_niles(tmp_path, "sync", "--dry-run", "--no-push", "--message", "Update Hutz CRM")
+    assert code == 0
+    assert payload["data"]["dry_run"] is True
+    assert payload["data"]["committed"] is False
+
+    code, payload = run_niles(tmp_path, "sync", "--no-push", "--message", "Update Hutz CRM")
+    assert code == 0
+    assert payload["data"]["committed"] is True
+    assert payload["data"]["pushed"] is False
+    tracked = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout.splitlines()
+    assert ".niles/manifest.json" in tracked
+    assert any(path.startswith(".niles/events/") for path in tracked)
+    assert not any(path.startswith(".niles/index/") for path in tracked)
+    assert "unrelated.txt" not in tracked
+    assert "A  unrelated.txt" in subprocess.run(["git", "status", "--short"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout
+
+    code, payload = run_niles(tmp_path, "sync", "--no-push")
+    assert code == 0
+    assert payload["data"]["committed"] is False
+
+
+def test_sync_requires_project_at_git_root(tmp_path):
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    assert run_niles(standalone, "init")[0] == 0
+    code, payload = run_niles(standalone, "sync", "--no-push")
+    assert code == 1
+    assert payload["errors"][0]["code"] == "not_git_repository"
+
+    repository = tmp_path / "repository"
+    project = repository / "crm"
+    project.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    assert run_niles(project, "init")[0] == 0
+    code, payload = run_niles(project, "sync", "--no-push")
+    assert code == 1
+    assert payload["errors"][0]["code"] == "git_root_mismatch"
 
 
 def test_rebuild_index_restores_deleted_sqlite_projection(tmp_path):
@@ -519,12 +567,12 @@ def test_intake_pull_is_quarantined_deduplicated_and_reviewed(tmp_path):
     responses = tmp_path / "responses.json"
     responses.write_text(json.dumps({"data": [{"id": "response-1", "answer": {"name": "Maya Chen", "email": "maya@example.com", "company": "Acme", "message": "Interested in a demo"}}]}), encoding="utf-8")
 
-    code, payload = run_niles(tmp_path, "intake", "pull", form_id, "--from-file", str(responses))
+    code, payload = run_niles(tmp_path, "intake", "import", form_id, str(responses))
     assert code == 0
     assert payload["data"]["received"] == 1
     assert payload["data"]["quarantined"] is True
     assert run_niles(tmp_path, "status")[1]["data"]["contacts"] == 0
-    assert run_niles(tmp_path, "intake", "pull", form_id, "--from-file", str(responses))[1]["data"]["skipped"] == 1
+    assert run_niles(tmp_path, "intake", "import", form_id, str(responses))[1]["data"]["skipped"] == 1
 
     submission = run_niles(tmp_path, "intake", "review")[1]["data"]["pending"][0]
     code, payload = run_niles(tmp_path, "intake", "review", submission["id"], "--accept")
@@ -540,7 +588,7 @@ def test_status_request_submission_routes_only_after_acceptance(tmp_path):
     form_id = register_form(tmp_path, "status-request", "debrief", contact["id"])
     responses = tmp_path / "status.json"
     responses.write_text(json.dumps({"responses": [{"response_id": "status-1", "answers": {"summary": "Renewal conversation", "sentiment": "positive", "next_step": "Send renewal", "next_by": "2026-09-12", "owner": "robin"}}]}), encoding="utf-8")
-    assert run_niles(tmp_path, "status-request", "pull", form_id, "--from-file", str(responses))[0] == 0
+    assert run_niles(tmp_path, "status-request", "import", form_id, str(responses))[0] == 0
     assert run_niles(tmp_path, "note", "list", "maya-chen")[1]["data"]["notes"] == []
     submission_id = run_niles(tmp_path, "status-request", "review")[1]["data"]["pending"][0]["id"]
     assert run_niles(tmp_path, "status-request", "review", submission_id, "--accept")[0] == 0
@@ -574,12 +622,70 @@ def test_recommendation_import_review_accept_and_reject(tmp_path):
         assert len(Jobs.load(str(job_path)).scenarios) == 1
 
 
-def test_network_publish_requires_explicit_ep_key(tmp_path, monkeypatch):
-    monkeypatch.delenv("EXPECTED_PARROT_API_KEY", raising=False)
+def test_form_export_and_ep_registration_are_offline(tmp_path):
     assert run_niles(tmp_path, "init")[0] == 0
-    code, payload = run_niles(tmp_path, "intake", "publish", "intake-basic")
-    assert code == 1
-    assert payload["errors"][0]["code"] == "missing_ep_api_key"
+    survey_path = tmp_path / "intake.ep"
+    code, payload = run_niles(tmp_path, "intake", "export", "intake-basic", "--output", str(survey_path))
+    assert code == 0
+    assert payload["data"]["network"] is False
+    assert payload["data"]["publish_command"].startswith("ep humanize create")
+    assert survey_path.is_file()
+    registration = tmp_path / "registration.json"
+    registration.write_text(json.dumps({"human_survey_uuid": "remote-intake", "respondent_url": "https://example.test/respond", "admin_url": "https://example.test/admin"}), encoding="utf-8")
+    code, payload = run_niles(tmp_path, "intake", "register", "intake-basic", str(registration))
+    assert code == 0
+    assert payload["data"]["form"]["remote_uuid"] == "remote-intake"
+
+
+def test_managed_exchange_hides_storage_paths_from_routine_commands(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    code, exported = run_niles(tmp_path, "intake", "export", "intake-basic")
+    if not importlib.util.find_spec("edsl"):
+        assert code == 1
+        assert exported["errors"][0]["code"] == "edsl_not_installed"
+        return
+
+    assert code == 0
+    export_data = exported["data"]
+    assert export_data["managed"] is True
+    assert Path(export_data["path"]).is_file()
+    assert export_data["registration_path"] in export_data["publish_command"]
+
+    Path(export_data["registration_path"]).write_text(
+        json.dumps({"human_survey_uuid": "remote-managed"}), encoding="utf-8"
+    )
+    code, registered = run_niles(tmp_path, "intake", "register", "intake-basic")
+    assert code == 0
+    registration_data = registered["data"]
+    assert registration_data["responses_path"] in registration_data["pull_command"]
+
+    Path(registration_data["responses_path"]).write_text(
+        json.dumps({"data": [{"id": "managed-1", "answer": {"name": "Lyle Lanley"}}]}),
+        encoding="utf-8",
+    )
+    form_id = registration_data["form"]["id"]
+    code, imported = run_niles(tmp_path, "intake", "import", form_id)
+    assert code == 0
+    assert imported["data"]["received"] == 1
+
+
+def test_managed_recommendation_exchange_uses_name(tmp_path):
+    assert run_niles(tmp_path, "init")[0] == 0
+    contact = run_niles(tmp_path, "contact", "add", "Marge Simpson")[1]["data"]["contact"]
+    if not importlib.util.find_spec("edsl"):
+        return
+    code, exported = run_niles(tmp_path, "recommend", "export", "client-next-step")
+    assert code == 0
+    data = exported["data"]
+    assert data["managed"] is True
+    assert data["results_path"] in data["run_command"]
+    Path(data["results_path"]).write_text(
+        json.dumps({"data": [{"scenario": {"contact_id": contact["id"]}, "answer": {"recommended_task": "Call Marge"}}]}),
+        encoding="utf-8",
+    )
+    code, imported = run_niles(tmp_path, "recommend", "import", "--name", "client-next-step")
+    assert code == 0
+    assert imported["data"]["imported"] == 1
 
 
 def test_survey_run_validation_and_additional_routes(tmp_path):
@@ -658,7 +764,7 @@ def test_intake_merge_reject_close_and_review_guards(tmp_path):
         {"id": "merge", "answer": {"name": "Maya", "email": "maya@example.com", "message": "Merge me"}},
         {"id": "reject", "answer": {"name": "Spam", "email": "spam@example.com"}},
     ]}), encoding="utf-8")
-    assert run_niles(tmp_path, "intake", "pull", form_id, "--from-file", str(responses))[0] == 0
+    assert run_niles(tmp_path, "intake", "import", form_id, str(responses))[0] == 0
     pending = run_niles(tmp_path, "intake", "review")[1]["data"]["pending"]
     assert run_niles(tmp_path, "intake", "review", pending[0]["id"])[1]["errors"][0]["code"] == "decision_required"
     merge = next(item for item in pending if item["remote_id"] == "merge")
