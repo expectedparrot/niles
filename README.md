@@ -353,10 +353,12 @@ history are collapsed. Missing stages, relationship roles, actions, owners,
 and due dates appear as explicit cleanup warnings. CRM content is escaped
 before rendering.
 
-For a fully populated fictional CRM, use the
-[Hutz Law operating-report example](examples/hutz-law-crm/README.md). It builds
-the project entirely through public commands and includes contracting deals,
-a pilot, a stalled account, a warm introduction, lost accounts, mapped people,
+See the
+[published Hutz Law operating report](https://expectedparrot.github.io/niles/examples/hutz-law-crm-report.html)
+on GitHub Pages. Its reproducible
+[fictional CRM source](examples/hutz-law-crm/README.md) builds the project
+entirely through public commands and includes contracting deals, a pilot, a
+stalled account, a warm introduction, lost accounts, mapped people,
 commercial values, materials, and intentional cleanup warnings:
 
 ```bash

@@ -8,6 +8,8 @@ owned tasks, commercial values, materials, and intentional cleanup warnings.
 Every organization, person, interaction, value, and URL in the fixture is
 fictional and belongs to the Lionel Hutz/Springfield running example.
 
+[Open the generated example report on GitHub Pages](https://expectedparrot.github.io/niles/examples/hutz-law-crm-report.html).
+
 From the Niles repository:
 
 ```bash
@@ -26,4 +28,12 @@ should run the installed package:
 
 ```bash
 NILES_PYTHON=.venv/bin/python ./examples/hutz-law-crm/populate.sh /tmp/hutz-law-demo-venv
+```
+
+Maintainers can refresh the checked-in GitHub Pages report from the repository
+root with a new temporary target directory:
+
+```bash
+NILES_REPORT_OUTPUT="$PWD/docs/examples/hutz-law-crm-report.html" \
+  ./examples/hutz-law-crm/populate.sh /tmp/hutz-law-pages-refresh
 ```

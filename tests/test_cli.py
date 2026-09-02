@@ -442,6 +442,18 @@ def test_populated_hutz_law_example_generates_operating_report(tmp_path):
     assert "Refusing to overwrite" in repeated.stderr
 
 
+def test_published_hutz_law_report_is_checked_in():
+    report = ROOT / "docs" / "examples" / "hutz-law-crm-report.html"
+    assert report.is_file()
+    html = report.read_text(encoding="utf-8")
+    assert "Hutz Law CRM Status" in html
+    assert "Burns Industries" in html
+    assert "Globex Corporation" in html
+    assert 'id="report-search"' in html
+    assert "Google DeepMind" not in html
+    assert "Upwork" not in html
+
+
 def test_org_material_enrichment_and_merge(tmp_path):
     assert run_niles(tmp_path, "init")[0] == 0
     assert run_niles(tmp_path, "contact", "add", "Salesforce", "--tag", "target")[0] == 0

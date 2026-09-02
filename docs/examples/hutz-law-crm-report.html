@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Niles Status - Hutz Law</title>
+    <style>
+      :root {
+        --ep-green: #428a5f;
+        --ep-green-light: #5ba97a;
+        --ep-green-soft: rgba(66, 138, 95, 0.10);
+        --ep-dark: #1a1a1a;
+        --ep-gray: #666666;
+        --ep-light-gray: #f5f5f5;
+        --ep-border: #e0e0e0;
+        --ep-amber: #b26b2a;
+        --font-serif: Georgia, 'Times New Roman', serif;
+        --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        --font-mono: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: var(--font-sans); color: var(--ep-dark); background: #fff; line-height: 1.5; }
+      .shell { max-width: 1180px; margin: 0 auto; padding: 24px 24px 52px; }
+      header { border-bottom: 3px solid var(--ep-green); padding-bottom: 18px; margin-bottom: 24px; }
+      .brand-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 18px; }
+      .brand { font-family: var(--font-serif); color: var(--ep-green); font-size: 0.95rem; white-space: nowrap; }
+      .generated { color: var(--ep-gray); font-size: 0.78rem; }
+      h1 { margin: 0 0 10px; font-family: var(--font-serif); font-size: 3.6rem; line-height: 0.98; letter-spacing: 0; }
+      h2 { margin: 0; font-family: var(--font-serif); font-size: 1.2rem; color: var(--ep-green); }
+      p { margin: 0; color: var(--ep-gray); max-width: 820px; }
+      .lede { font-size: 1rem; }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-top: 20px; }
+      .stat { border: 1px solid var(--ep-border); border-radius: 8px; padding: 13px 14px; background: var(--ep-light-gray); min-height: 82px; }
+      .value { display: block; font-size: 2rem; line-height: 1.05; font-weight: 750; color: var(--ep-dark); }
+      .label { display: block; margin-top: 6px; color: var(--ep-gray); font-size: 0.82rem; }
+      .section { margin-top: 28px; }
+      .section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--ep-border); padding-bottom: 7px; margin-bottom: 10px; }
+      .section-note { color: var(--ep-gray); font-size: 0.78rem; }
+      .grid-2 { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.8fr); gap: 18px; align-items: start; }
+      .panel { border: 1px solid var(--ep-border); border-radius: 8px; padding: 14px; background: #fff; }
+      .panel h3 { margin: 0 0 8px; font-size: 0.88rem; text-transform: uppercase; letter-spacing: 0; color: var(--ep-gray); }
+      .panel .trait-list, .panel .muted { margin-top: 10px; }
+      .trait-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 0.86rem; }
+      .trait-list dt { color: var(--ep-gray); }
+      .trait-list dd { margin: 0; font-weight: 650; }
+      .table-wrap { overflow-x: auto; border: 1px solid var(--ep-border); border-radius: 8px; background: #fff; }
+      table { width: 100%; border-collapse: collapse; min-width: 720px; }
+      th, td { border-bottom: 1px solid var(--ep-border); padding: 10px 12px; text-align: left; vertical-align: top; }
+      th { background: var(--ep-light-gray); color: var(--ep-gray); font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0; font-weight: 750; }
+      td { font-size: 0.88rem; }
+      tr:last-child td { border-bottom: 0; }
+      a { color: var(--ep-green); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+      .badge { display: inline-flex; align-items: center; border-radius: 4px; background: var(--ep-green-soft); color: var(--ep-green); padding: 2px 7px; margin: 0 4px 4px 0; font-size: 0.76rem; font-weight: 700; white-space: nowrap; }
+      .priority { background: rgba(178, 107, 42, 0.12); color: var(--ep-amber); }
+      .kind { background: #f2f2f2; color: var(--ep-dark); }
+      .state.active { background: var(--ep-green-soft); color: var(--ep-green); }
+      .state.archived { background: #f2f2f2; color: var(--ep-gray); }
+      .stage { text-transform: capitalize; }
+      .owner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .owner-group { border: 1px solid var(--ep-border); border-radius: 8px; padding: 12px 14px; }
+      .owner-group h3 { margin: 0 0 8px; color: var(--ep-green); }
+      .owner-group ul, .warning-list { margin: 0; padding-left: 20px; }
+      .owner-group li { margin: 7px 0; }
+      .overdue { color: #9b2c24; }
+      .warning-panel { background: #fff8e8; border-color: #e5c27a; }
+      .report-controls { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 0 0 24px; padding: 12px; background: rgba(255,255,255,.96); border: 1px solid var(--ep-border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.06); }
+      .report-controls label { display: grid; gap: 3px; color: var(--ep-gray); font-size: .72rem; font-weight: 700; text-transform: uppercase; }
+      .report-controls input, .report-controls select, .report-controls button { min-height: 36px; border: 1px solid var(--ep-border); border-radius: 5px; padding: 7px 9px; background: #fff; color: var(--ep-dark); font: inherit; }
+      .report-controls input { min-width: min(320px, 70vw); }
+      .report-controls button { cursor: pointer; font-weight: 700; }
+      .report-controls button:hover { border-color: var(--ep-green); color: var(--ep-green); }
+      .filter-count { margin-left: auto; color: var(--ep-gray); font-size: .78rem; }
+      th.sortable { cursor: pointer; user-select: none; }
+      th.sortable::after { content: " ↕"; color: #aaa; }
+      th.sortable[data-direction="asc"]::after { content: " ↑"; color: var(--ep-green); }
+      th.sortable[data-direction="desc"]::after { content: " ↓"; color: var(--ep-green); }
+      .filtered-out { display: none !important; }
+      details { border: 1px solid var(--ep-border); border-radius: 8px; margin: 8px 0; padding: 9px 12px; }
+      summary { cursor: pointer; color: var(--ep-green); }
+      .row-tags { margin-top: 5px; }
+      .subtle { color: var(--ep-gray); font-size: 0.78rem; margin-top: 2px; }
+      .muted { color: var(--ep-gray); }
+      .empty-cell { color: var(--ep-gray); text-align: center; padding: 24px; }
+      footer { color: var(--ep-gray); font-size: 0.78rem; margin-top: 34px; border-top: 1px solid var(--ep-border); padding-top: 12px; }
+      @media (max-width: 760px) {
+        .shell { padding: 18px 14px 40px; }
+        .brand-row, .section-head { align-items: flex-start; flex-direction: column; gap: 6px; }
+        .grid-2 { grid-template-columns: 1fr; }
+        h1 { font-size: 2.25rem; }
+        .filter-count { width: 100%; margin-left: 0; }
+      }
+      @media print { .report-controls { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div class="brand-row">
+          <span class="brand">E[&#x1f99c;] Expected Parrot</span>
+          <span class="generated">Generated 2026-09-02 by niles</span>
+        </div>
+        <h1>Hutz Law CRM Status</h1>
+        <p class="lede">Lionel Hutz represents Springfield clients with enthusiasm and inconsistent paperwork.</p>
+        <div class="stats">
+          <div class="stat"><span class="value">18</span><span class="label">active contacts</span></div>
+          <div class="stat"><span class="value">0</span><span class="label">archived contacts</span></div>
+          <div class="stat"><span class="value">5</span><span class="label">open tasks</span></div>
+          <div class="stat"><span class="value">5</span><span class="label">notes captured</span></div>
+          <div class="stat"><span class="value">2</span><span class="label">sales materials</span></div>
+        </div>
+      </header>
+      <main>
+        <div class="report-controls" aria-label="Report filters">
+          <label>Search accounts, people, status, or actions<input id="report-search" type="search" placeholder="e.g. contract, Smithers, Robin"></label>
+          <label>Pipeline stage<select id="stage-filter"><option value="">All stages</option><option value="target">Target</option><option value="engaged">Engaged</option><option value="demo">Demo</option><option value="pilot">Pilot</option><option value="contracting">Contracting</option><option value="won">Won</option><option value="stalled">Stalled</option><option value="lost">Lost</option><option value="unspecified">Unspecified</option></select></label>
+          <button id="reset-filters" type="button">Reset</button>
+          <button id="toggle-history" type="button">Expand history</button>
+          <span class="filter-count" id="filter-count" aria-live="polite"></span>
+        </div>
+        <section class="section">
+          <div class="section-head"><h2>Closest to Revenue</h2><span class="section-note">Accounts explicitly staged demo, pilot, or contracting</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Current status</th><th>Next action · owner · due</th></tr></thead><tbody><tr class="pipeline-row" data-account="con_b0bc98441f11437893fa5c68" data-stage="contracting" data-search="burns industries contracting waiting on mr. burns to return the engagement letter. ask smithers for signature timing lionel waylon smithers"><td><strong>Burns Industries</strong></td><td><span class="badge stage">contracting</span></td><td><span class="badge priority">1</span></td><td><strong>Waylon Smithers</strong> <span class="subtle">champion</span></td><td>2026-08-27</td><td>Waiting on Mr. Burns to return the engagement letter.</td><td>Ask Smithers for signature timing<div class="subtle">lionel · 2026-09-03</div></td></tr>
+<tr class="pipeline-row" data-account="con_7da76d4b371b43b5be8a78f6" data-stage="contracting" data-search="globex corporation contracting retainer terms agreed; signature is the remaining step. send final retainer packet cookie hank scorpio"><td><strong>Globex Corporation</strong></td><td><span class="badge stage">contracting</span></td><td><span class="badge priority">1</span></td><td><strong>Hank Scorpio</strong> <span class="subtle">decision-maker</span></td><td>2026-08-30</td><td>Retainer terms agreed; signature is the remaining step.</td><td>Send final retainer packet<div class="subtle">cookie · 2026-09-04</div></td></tr>
+<tr class="pipeline-row" data-account="con_564c1c73fe994ad5939114f3" data-stage="pilot" data-search="springfield monorail authority pilot negotiating an investigative review of the monorail contract. return scoped investigation proposal lionel lyle lanley"><td><strong>Springfield Monorail Authority</strong></td><td><span class="badge stage">pilot</span></td><td><span class="badge priority">2</span></td><td><strong>Lyle Lanley</strong> <span class="subtle">champion</span></td><td>2026-08-25</td><td>Negotiating an investigative review of the monorail contract.</td><td>Return scoped investigation proposal<div class="subtle">lionel · 2026-09-06</div></td></tr></tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Actions Due This Week</h2><span class="section-note">Grouped by owner; overdue actions shown in red</span></div>
+          <div class="owner-grid"><div class="owner-group" data-search="cookie send final retainer packet globex corporation draft a temporary kiosk workaround the leftorium send smithers a forwardable introduction springfield nuclear power plant"><h3>cookie</h3><ul><li class=""><strong>Send final retainer packet</strong> — Globex Corporation <span class="subtle">2026-09-04</span></li><li class=""><strong>Draft a temporary kiosk workaround</strong> — The Leftorium <span class="subtle">2026-09-05</span></li><li class=""><strong>Send Smithers a forwardable introduction</strong> — Springfield Nuclear Power Plant <span class="subtle">2026-09-07</span></li></ul></div>
+<div class="owner-group" data-search="lionel ask smithers for signature timing burns industries return scoped investigation proposal springfield monorail authority"><h3>lionel</h3><ul><li class=""><strong>Ask Smithers for signature timing</strong> — Burns Industries <span class="subtle">2026-09-03</span></li><li class=""><strong>Return scoped investigation proposal</strong> — Springfield Monorail Authority <span class="subtle">2026-09-06</span></li></ul></div></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Stalled or Waiting</h2><span class="section-note">Explicitly stalled accounts and latest statuses containing “waiting”</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Current status</th><th>Next action · owner · due</th></tr></thead><tbody><tr class="pipeline-row" data-account="con_b0bc98441f11437893fa5c68" data-stage="contracting" data-search="burns industries contracting waiting on mr. burns to return the engagement letter. ask smithers for signature timing lionel waylon smithers"><td><strong>Burns Industries</strong></td><td><span class="badge stage">contracting</span></td><td><span class="badge priority">1</span></td><td><strong>Waylon Smithers</strong> <span class="subtle">champion</span></td><td>2026-08-27</td><td>Waiting on Mr. Burns to return the engagement letter.</td><td>Ask Smithers for signature timing<div class="subtle">lionel · 2026-09-03</div></td></tr>
+<tr class="pipeline-row" data-account="con_2e6c296c83594b36b1d0dab4" data-stage="stalled" data-search="the leftorium stalled waiting on the mall to approve a lease amendment. draft a temporary kiosk workaround cookie ned flanders"><td><strong>The Leftorium</strong></td><td><span class="badge stage">stalled</span></td><td><span class="badge priority">2</span></td><td><strong>Ned Flanders</strong> <span class="subtle">owner</span></td><td>2026-08-14</td><td>Waiting on the mall to approve a lease amendment.</td><td>Draft a temporary kiosk workaround<div class="subtle">cookie · 2026-09-05</div></td></tr></tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Active Pipeline</h2><span class="section-note">Won, lost, and dead accounts excluded</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Current status</th><th>Next action · owner · due</th></tr></thead><tbody><tr class="pipeline-row" data-account="con_b0bc98441f11437893fa5c68" data-stage="contracting" data-search="burns industries contracting waiting on mr. burns to return the engagement letter. ask smithers for signature timing lionel waylon smithers"><td><strong>Burns Industries</strong></td><td><span class="badge stage">contracting</span></td><td><span class="badge priority">1</span></td><td><strong>Waylon Smithers</strong> <span class="subtle">champion</span></td><td>2026-08-27</td><td>Waiting on Mr. Burns to return the engagement letter.</td><td>Ask Smithers for signature timing<div class="subtle">lionel · 2026-09-03</div></td></tr>
+<tr class="pipeline-row" data-account="con_7da76d4b371b43b5be8a78f6" data-stage="contracting" data-search="globex corporation contracting retainer terms agreed; signature is the remaining step. send final retainer packet cookie hank scorpio"><td><strong>Globex Corporation</strong></td><td><span class="badge stage">contracting</span></td><td><span class="badge priority">1</span></td><td><strong>Hank Scorpio</strong> <span class="subtle">decision-maker</span></td><td>2026-08-30</td><td>Retainer terms agreed; signature is the remaining step.</td><td>Send final retainer packet<div class="subtle">cookie · 2026-09-04</div></td></tr>
+<tr class="pipeline-row" data-account="con_564c1c73fe994ad5939114f3" data-stage="pilot" data-search="springfield monorail authority pilot negotiating an investigative review of the monorail contract. return scoped investigation proposal lionel lyle lanley"><td><strong>Springfield Monorail Authority</strong></td><td><span class="badge stage">pilot</span></td><td><span class="badge priority">2</span></td><td><strong>Lyle Lanley</strong> <span class="subtle">champion</span></td><td>2026-08-25</td><td>Negotiating an investigative review of the monorail contract.</td><td>Return scoped investigation proposal<div class="subtle">lionel · 2026-09-06</div></td></tr>
+<tr class="pipeline-row" data-account="con_13127cce45c146eaa185fd9b" data-stage="target" data-search="springfield nuclear power plant target smithers offered to make an introduction to the innovation team. send smithers a forwardable introduction cookie waylon smithers"><td><strong>Springfield Nuclear Power Plant</strong></td><td><span class="badge stage">target</span></td><td><span class="badge priority">3</span></td><td><strong>Waylon Smithers</strong> <span class="subtle">introducer</span></td><td>2026-08-21</td><td>Smithers offered to make an introduction to the innovation team.</td><td>Send Smithers a forwardable introduction<div class="subtle">cookie · 2026-09-07</div></td></tr>
+<tr class="pipeline-row" data-account="con_2e6c296c83594b36b1d0dab4" data-stage="stalled" data-search="the leftorium stalled waiting on the mall to approve a lease amendment. draft a temporary kiosk workaround cookie ned flanders"><td><strong>The Leftorium</strong></td><td><span class="badge stage">stalled</span></td><td><span class="badge priority">2</span></td><td><strong>Ned Flanders</strong> <span class="subtle">owner</span></td><td>2026-08-14</td><td>Waiting on the mall to approve a lease amendment.</td><td>Draft a temporary kiosk workaround<div class="subtle">cookie · 2026-09-05</div></td></tr>
+<tr class="pipeline-row" data-account="con_056e5de9b8d84b3282a070ed" data-stage="unspecified" data-search="blue-haired lawyer unspecified no status recorded"><td><strong>Blue-Haired Lawyer</strong></td><td><span class="badge stage">unspecified</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No status recorded</td><td>No next action<div class="subtle"></div></td></tr>
+<tr class="pipeline-row" data-account="con_f29bc742772b4349813c1296" data-stage="unspecified" data-search="unidentified courthouse lead unspecified no status recorded"><td><strong>Unidentified courthouse lead</strong></td><td><span class="badge stage">unspecified</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No status recorded</td><td>No next action<div class="subtle"></div></td></tr></tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Commercial View</h2><span class="section-note">Explicit values only; no inferred forecast</span></div><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Accounts</th><th>Deal value</th><th>Expected MRR</th></tr></thead><tbody><tr><td><span class="badge stage">target</span></td><td>1</td><td>$0</td><td>$0</td></tr>
+<tr><td><span class="badge stage">pilot</span></td><td>1</td><td>$60,000</td><td>$5,000</td></tr>
+<tr><td><span class="badge stage">contracting</span></td><td>2</td><td>$210,000</td><td>$17,500</td></tr>
+<tr><td><span class="badge stage">stalled</span></td><td>1</td><td>$36,000</td><td>$3,000</td></tr>
+<tr><td><span class="badge stage">lost</span></td><td>5</td><td>$0</td><td>$0</td></tr></tbody></table></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Warm Introductions</h2><span class="section-note">Target accounts with an explicit connector</span></div><div class="table-wrap"><table><thead><tr><th>Target</th><th>Connector</th><th>Status</th><th>Next action</th></tr></thead><tbody><tr><td><strong>Springfield Nuclear Power Plant</strong></td><td>Smithers</td><td>Smithers offered to make an introduction to the innovation team.</td><td>Send Smithers a forwardable introduction</td></tr></tbody></table></div>
+        </section>
+
+        <section class="grid-2 section">
+          <div class="panel warning-panel"><h3>Data quality and cleanup</h3><ul class="warning-list"><li>Blue-Haired Lawyer: pipeline stage missing</li><li>Blue-Haired Lawyer: next action missing</li><li>Blue-Haired Lawyer: no people mapped to this account</li><li>Unidentified courthouse lead: pipeline stage missing</li><li>Unidentified courthouse lead: next action missing</li><li>Unidentified courthouse lead: no people mapped to this account</li><li>Olivia: relationship role missing</li><li>Olivia: possibly incomplete or ambiguous person name</li></ul></div>
+          <aside class="panel"><h3>Organization</h3><p>Lionel Hutz represents Springfield clients with enthusiasm and inconsistent paperwork.</p><dl class="trait-list"><dt>reporting_currency</dt><dd>USD</dd></dl></aside>
+        </section>
+
+        <section class="section">
+          <details><summary><strong>Won, Lost, and Dead Accounts</strong> — 5 excluded from active pipeline</summary>
+            <div class="table-wrap"><table><thead><tr><th>Account</th><th>Stage</th><th>Priority</th><th>People</th><th>Latest real interaction</th><th>Final status</th><th>Remaining action</th></tr></thead><tbody><tr class="pipeline-row" data-account="con_86ab43a4152047729b520fc4" data-stage="lost" data-search="duff brewery lost no status recorded"><td><strong>Duff Brewery</strong></td><td><span class="badge stage">lost</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No status recorded</td><td>No next action<div class="subtle"></div></td></tr>
+<tr class="pipeline-row" data-account="con_8717585f3766489798a91bf0" data-stage="lost" data-search="itchy and scratchy studios lost no status recorded"><td><strong>Itchy and Scratchy Studios</strong></td><td><span class="badge stage">lost</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No status recorded</td><td>No next action<div class="subtle"></div></td></tr>
+<tr class="pipeline-row" data-account="con_364a40cba9294e69b8a8dc05" data-stage="lost" data-search="krustylu studios lost no active path after evaluation"><td><strong>Krustylu Studios</strong></td><td><span class="badge stage">lost</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No active path after evaluation</td><td>No next action<div class="subtle"></div></td></tr>
+<tr class="pipeline-row" data-account="con_8a81de5ff7cc4cc587b83870" data-stage="lost" data-search="shelbyville nuclear lost no status recorded"><td><strong>Shelbyville Nuclear</strong></td><td><span class="badge stage">lost</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No status recorded</td><td>No next action<div class="subtle"></div></td></tr>
+<tr class="pipeline-row" data-account="con_3042801b867b4825a07c5479" data-stage="lost" data-search="springfield republican party lost no status recorded"><td><strong>Springfield Republican Party</strong></td><td><span class="badge stage">lost</span></td><td><span class="muted">-</span></td><td><span class="muted">No mapped people</span></td><td>No dated interaction</td><td>No status recorded</td><td>No next action<div class="subtle"></div></td></tr></tbody></table></div>
+          </details>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Materials</h2><span class="section-note">Company context available to agents</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Title</th><th>Location</th><th>Tags</th><th>Added</th></tr></thead><tbody><tr><td><strong>Hutz Law engagement letter</strong><div class="subtle">Standard fictional engagement letter</div></td><td><a href="https://example.invalid/hutz-law/engagement-letter">https://example.invalid/hutz-law/engagement-letter</a></td><td><span class="badge tag">contract</span><span class="badge tag">sales</span></td><td>2026-09-02</td></tr>
+<tr><td><strong>Monorail investigation outline</strong><div class="subtle">Proposed fictional investigation scope</div></td><td><a href="https://example.invalid/hutz-law/monorail-review">https://example.invalid/hutz-law/monorail-review</a></td><td><span class="badge tag">pilot</span><span class="badge tag">sales</span></td><td>2026-09-02</td></tr></tbody></table></div>
+        </section>
+
+        <section class="section history">
+          <div class="section-head"><h2>Relationship History</h2><span class="section-note">Collapsed by account; latest status is shown in the pipeline above</span></div>
+          <details><summary><strong>Burns Industries</strong> — 1 notes</summary><ol><li><span class="subtle">2026-08-27</span> Waiting on Mr. Burns to return the engagement letter.</li></ol></details>
+<details><summary><strong>Globex Corporation</strong> — 1 notes</summary><ol><li><span class="subtle">2026-08-30</span> Retainer terms agreed; signature is the remaining step.</li></ol></details>
+<details><summary><strong>Springfield Monorail Authority</strong> — 1 notes</summary><ol><li><span class="subtle">2026-08-25</span> Negotiating an investigative review of the monorail contract.</li></ol></details>
+<details><summary><strong>Springfield Nuclear Power Plant</strong> — 1 notes</summary><ol><li><span class="subtle">2026-08-21</span> Smithers offered to make an introduction to the innovation team.</li></ol></details>
+<details><summary><strong>The Leftorium</strong> — 1 notes</summary><ol><li><span class="subtle">2026-08-14</span> Waiting on the mall to approve a lease amendment.</li></ol></details>
+        </section>
+      </main>
+      <footer>Generated 2026-09-02T13:56:30+00:00 by niles &middot; Expected Parrot</footer>
+    </div>
+    <script>
+      (() => {
+        const search = document.querySelector('#report-search');
+        const stage = document.querySelector('#stage-filter');
+        const count = document.querySelector('#filter-count');
+        const rows = [...document.querySelectorAll('.pipeline-row')];
+        const ownerGroups = [...document.querySelectorAll('.owner-group')];
+        function filterReport() {
+          const query = search.value.trim().toLowerCase();
+          const selectedStage = stage.value;
+          const visibleAccounts = new Set();
+          rows.forEach(row => {
+            const show = (!query || row.dataset.search.includes(query)) && (!selectedStage || row.dataset.stage === selectedStage);
+            row.classList.toggle('filtered-out', !show);
+            if (show) visibleAccounts.add(row.dataset.account);
+          });
+          ownerGroups.forEach(group => group.classList.toggle('filtered-out', Boolean(query) && !group.dataset.search.includes(query)));
+          count.textContent = `${visibleAccounts.size} matching account${visibleAccounts.size === 1 ? '' : 's'}`;
+        }
+        search.addEventListener('input', filterReport);
+        stage.addEventListener('change', filterReport);
+        document.querySelector('#reset-filters').addEventListener('click', () => { search.value = ''; stage.value = ''; filterReport(); search.focus(); });
+
+        let historyOpen = false;
+        const historyDetails = [...document.querySelectorAll('.history details')];
+        const historyButton = document.querySelector('#toggle-history');
+        historyButton.addEventListener('click', () => {
+          historyOpen = !historyOpen;
+          historyDetails.forEach(detail => detail.open = historyOpen);
+          historyButton.textContent = historyOpen ? 'Collapse history' : 'Expand history';
+        });
+
+        document.querySelectorAll('table').forEach(table => {
+          const body = table.tBodies[0];
+          if (!body) return;
+          [...table.tHead.rows[0].cells].forEach((header, column) => {
+            header.classList.add('sortable'); header.tabIndex = 0; header.setAttribute('role', 'button');
+            const sort = () => {
+              const direction = header.dataset.direction === 'asc' ? 'desc' : 'asc';
+              [...header.parentElement.cells].forEach(cell => delete cell.dataset.direction);
+              header.dataset.direction = direction;
+              const factor = direction === 'asc' ? 1 : -1;
+              [...body.rows].sort((a, b) => a.cells[column].innerText.trim().localeCompare(b.cells[column].innerText.trim(), undefined, {numeric:true}) * factor).forEach(row => body.appendChild(row));
+            };
+            header.addEventListener('click', sort);
+            header.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); sort(); } });
+          });
+        });
+        filterReport();
+      })();
+    </script>
+  </body>
+</html>

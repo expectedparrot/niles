@@ -3,6 +3,7 @@ set -euo pipefail
 
 target=${1:-hutz-law-demo}
 niles_python=${NILES_PYTHON:-python3}
+report_output=${NILES_REPORT_OUTPUT:-crm-operating-report.html}
 
 mkdir -p "$target"
 cd "$target"
@@ -87,9 +88,15 @@ quiet_niles material add "Monorail investigation outline" \
   --url "https://example.invalid/hutz-law/monorail-review" \
   --description "Proposed fictional investigation scope" --tag sales --tag pilot
 
-quiet_niles report status --html crm-operating-report.html
+quiet_niles report status --html "$report_output"
+
+if [[ "$report_output" = /* ]]; then
+  report_path=$report_output
+else
+  report_path=$PWD/$report_output
+fi
 
 echo
 echo "Populated example CRM: $PWD"
-echo "Operating report: $PWD/crm-operating-report.html"
+echo "Operating report: $report_path"
 echo "Open it in a browser to exercise search, stage filters, sorting, and history controls."
