@@ -263,6 +263,20 @@ def build_parser() -> argparse.ArgumentParser:
     human_update.add_argument("--entity-id", action="append", default=[])
     human_update.add_argument("--include-archived", action="store_true")
 
+    sheet = sub.add_parser("sheet")
+    sheet_sub = sheet.add_subparsers(dest="sheet_command", required=True)
+    sheet_export = sheet_sub.add_parser("export")
+    sheet_export.add_argument("--scope", choices=["pipeline", "people", "organizations", "all"], default="pipeline")
+    sheet_export.add_argument("--output", required=True)
+    sheet_import = sheet_sub.add_parser("import")
+    sheet_import.add_argument("path")
+    sheet_review = sheet_sub.add_parser("review")
+    sheet_review.add_argument("change_set_id", nargs="?")
+    sheet_decision = sheet_review.add_mutually_exclusive_group()
+    sheet_decision.add_argument("--accept", action="store_true")
+    sheet_decision.add_argument("--reject", action="store_true")
+    sheet_review.add_argument("--note")
+
     recommend = sub.add_parser("recommend")
     recommend_sub = recommend.add_subparsers(dest="recommend_command", required=True)
     recommend_export = recommend_sub.add_parser("export")
@@ -456,6 +470,16 @@ def dispatch(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 include_archived=args.include_archived,
             ),
         )
+    if args.command == "sheet":
+        if args.sheet_command == "export":
+            return ok("sheet export", argv, project.export_sheet(Path(args.output), args.scope))
+        if args.sheet_command == "import":
+            return ok("sheet import", argv, project.import_sheet(Path(args.path)))
+        if not args.change_set_id:
+            return ok("sheet review", argv, {"pending": project.list_sheet_changes()})
+        if not args.accept and not args.reject:
+            raise NilesError("decision_required", "Choose --accept or --reject.")
+        return ok("sheet review", argv, project.review_sheet_change(args.change_set_id, args.accept, args.note))
     if args.command == "recommend":
         return dispatch_recommend(project, args, argv)
     if args.command == "report":
@@ -540,6 +564,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "niles intake export/register/import/status/close/review",
                 "niles status-request export/register/import/status/review",
                 "niles human-update [--scope pipeline|people|organizations|all] [--tag t] [--stage s] [--entity-id id] [--include-archived] --output <update-job.ep>",
+                "niles sheet export/import/review",
                 "niles recommend export/import/review/accept/reject",
                 "niles report status --html <path>",
                 "niles enrich ingest",
@@ -552,6 +577,7 @@ def dispatch_agent(args: argparse.Namespace, argv: list[str]) -> Envelope:
                 "intake": ["niles intake export", "run data.publish_command", "niles intake register", "run data.pull_command", "niles intake import", "niles intake review"],
                 "status_request": ["niles status-request export", "run data.publish_command", "niles status-request register", "run data.pull_command", "niles status-request import", "niles status-request review"],
                 "human_update": ["niles human-update --scope pipeline --output update-job.ep", "run data.publish_command"],
+                "spreadsheet": ["niles sheet export --output crm-review.xlsx", "edit the workbook", "niles sheet import crm-review.xlsx", "niles sheet review <change-set-id> --accept"],
                 "recommendation": ["niles recommend export", "run data.run_command", "niles recommend import", "niles recommend review"],
             },
         },
@@ -855,6 +881,7 @@ def command_name(args: argparse.Namespace) -> str:
         "survey_command",
         "intake_command",
         "status_request_command",
+        "sheet_command",
         "recommend_command",
         "report_command",
         "enrich_command",

@@ -92,6 +92,8 @@ SUPPORTED_EVENT_TYPES = {
     "submission_reviewed",
     "recommendation_imported",
     "recommendation_reviewed",
+    "sheet_change_imported",
+    "sheet_change_reviewed",
 }
 
 
@@ -421,6 +423,15 @@ class Project:
               status text not null,
               imported_at text not null,
               reviewed_at text
+            );
+            create table if not exists sheet_changes (
+              id text primary key,
+              source_path text not null,
+              changes text not null,
+              status text not null,
+              imported_at text not null,
+              reviewed_at text,
+              review_note text
             );
             """
         )
@@ -969,6 +980,16 @@ class Project:
             conn.execute("insert or replace into recommendations (id, contact_id, text, rationale, source_path, status, imported_at) values (?, ?, ?, ?, ?, 'pending', ?)", (payload["id"], payload["contact_id"], payload["text"], payload.get("rationale"), payload["source_path"], payload["imported_at"]))
         elif kind == "recommendation_reviewed":
             conn.execute("update recommendations set status = ?, reviewed_at = ? where id = ?", (payload["status"], payload["reviewed_at"], payload["id"]))
+        elif kind == "sheet_change_imported":
+            conn.execute(
+                "insert or replace into sheet_changes (id, source_path, changes, status, imported_at) values (?, ?, ?, 'pending', ?)",
+                (payload["id"], payload["source_path"], dumps(payload["changes"]), payload["imported_at"]),
+            )
+        elif kind == "sheet_change_reviewed":
+            conn.execute(
+                "update sheet_changes set status = ?, reviewed_at = ?, review_note = ? where id = ?",
+                (payload["status"], payload["reviewed_at"], payload.get("note"), payload["id"]),
+            )
         self._refresh_search_index(conn)
         conn.commit()
 
@@ -1664,6 +1685,231 @@ class Project:
         self.exchange_dir.mkdir(parents=True, exist_ok=True)
         return self.exchange_dir / filename
 
+    def export_sheet(self, output: Path, scope: str = "pipeline") -> dict[str, Any]:
+        try:
+            from openpyxl import Workbook
+            from openpyxl.formatting.rule import FormulaRule
+            from openpyxl.styles import Font, PatternFill
+            from openpyxl.worksheet.datavalidation import DataValidation
+        except ImportError as exc:
+            raise NilesError("spreadsheet_not_installed", "Spreadsheet export requires openpyxl. Install niles[spreadsheet].") from exc
+
+        def kind(contact: dict[str, Any]) -> str:
+            tags = {str(tag).casefold() for tag in contact.get("tags", [])}
+            declared = str(contact.get("traits", {}).get("entity_type") or "").casefold()
+            if declared in {"person", "individual"} or tags & {"person", "individual"} or contact.get("company"):
+                return "person"
+            if declared in {"company", "organization", "organisation", "account"} or tags & {"company", "organization", "organisation", "account", "prospect", "target", "lead", "customer", "client"} or contact.get("traits", {}).get("stage"):
+                return "organization"
+            return "ambiguous"
+
+        pipeline_tags = {"prospect", "target", "lead", "customer", "client"}
+        contacts = self.list_contacts()
+        if scope == "pipeline":
+            contacts = [contact for contact in contacts if kind(contact) == "organization" and (contact.get("traits", {}).get("stage") or {str(tag).casefold() for tag in contact.get("tags", [])} & pipeline_tags)]
+        elif scope == "people":
+            contacts = [contact for contact in contacts if kind(contact) == "person"]
+        elif scope == "organizations":
+            contacts = [contact for contact in contacts if kind(contact) == "organization"]
+        contacts.sort(key=lambda item: item["name"].casefold())
+        if not contacts:
+            raise NilesError("no_entities", "No entities matched the requested spreadsheet scope.", {"scope": scope})
+
+        open_tasks = self.list_tasks(status="open")
+        task_by_contact: dict[str, dict[str, Any]] = {}
+        for task in open_tasks:
+            if task.get("contact_id"):
+                task_by_contact.setdefault(task["contact_id"], task)
+        latest_notes: dict[str, dict[str, Any]] = {}
+        for note in self.list_notes():
+            latest_notes.setdefault(note["contact_id"], note)
+
+        headers = ["Name", "Entity Type", "Company", "Stage", "Current Status", "Next Action", "Owner", "Due Date", "Add Note", "_entity_id", "_task_id"]
+        baseline: dict[str, dict[str, Any]] = {}
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "CRM"
+        sheet.append(headers)
+        header_fill = PatternFill("solid", fgColor="428A5F")
+        for cell in sheet[1]:
+            cell.fill = header_fill
+            cell.font = Font(color="FFFFFF", bold=True)
+        for contact in contacts:
+            task = task_by_contact.get(contact["id"])
+            latest = latest_notes.get(contact["id"])
+            values = {
+                "name": contact["name"],
+                "entity_type": kind(contact),
+                "company": contact.get("company") or "",
+                "stage": str(contact.get("traits", {}).get("stage") or ""),
+                "current_status": str(contact.get("traits", {}).get("current_status") or (latest["text"] if latest else "")),
+                "next_action": task.get("text") if task else "",
+                "owner": task.get("assignee") if task else "",
+                "due_date": task.get("due_date") if task else "",
+                "task_id": task.get("id") if task else "",
+            }
+            baseline[contact["id"]] = values
+            sheet.append([values["name"], values["entity_type"], values["company"], values["stage"], values["current_status"], values["next_action"], values["owner"], values["due_date"], "", contact["id"], values["task_id"]])
+
+        lists = workbook.create_sheet("_lists")
+        stages = ["target", "engaged", "demo", "pilot", "contracting", "won", "stalled", "lost"]
+        entity_types = ["person", "organization", "ambiguous"]
+        for index, value in enumerate(stages, start=1):
+            lists.cell(index, 1, value)
+        for index, value in enumerate(entity_types, start=1):
+            lists.cell(index, 2, value)
+        stage_validation = DataValidation(type="list", formula1=f"'_lists'!$A$1:$A${len(stages)}", allow_blank=True)
+        type_validation = DataValidation(type="list", formula1=f"'_lists'!$B$1:$B${len(entity_types)}", allow_blank=False)
+        sheet.add_data_validation(stage_validation)
+        sheet.add_data_validation(type_validation)
+        stage_validation.add(f"D2:D{sheet.max_row}")
+        type_validation.add(f"B2:B{sheet.max_row}")
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = f"A1:I{sheet.max_row}"
+        widths = {"A": 28, "B": 16, "C": 24, "D": 16, "E": 52, "F": 38, "G": 18, "H": 14, "I": 52}
+        for column, width in widths.items():
+            sheet.column_dimensions[column].width = width
+        sheet.column_dimensions["J"].hidden = True
+        sheet.column_dimensions["K"].hidden = True
+        changed_fill = PatternFill("solid", fgColor="FFF2CC")
+        sheet.conditional_formatting.add(f"I2:I{sheet.max_row}", FormulaRule(formula=["LEN(I2)>0"], fill=changed_fill))
+
+        metadata = workbook.create_sheet("_niles")
+        metadata["A1"] = "schema_version"
+        metadata["B1"] = "niles.sheet.v1"
+        metadata["A2"] = "scope"
+        metadata["B2"] = scope
+        metadata["A3"] = "event_sequence"
+        metadata["B3"] = self._next_sequence() - 1
+        metadata["A4"] = "baseline"
+        metadata["B4"] = json.dumps(baseline, sort_keys=True)
+        metadata.sheet_state = "hidden"
+        lists.sheet_state = "hidden"
+        path = output if output.is_absolute() else self.root / output
+        path.parent.mkdir(parents=True, exist_ok=True)
+        workbook.save(path)
+        return {"path": str(path), "scope": scope, "entities": len(contacts), "event_sequence": self._next_sequence() - 1, "network": False}
+
+    def import_sheet(self, workbook_path: Path) -> dict[str, Any]:
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise NilesError("spreadsheet_not_installed", "Spreadsheet import requires openpyxl. Install niles[spreadsheet].") from exc
+        path = workbook_path if workbook_path.is_absolute() else self.root / workbook_path
+        if not path.is_file():
+            raise NilesError("sheet_not_found", f"Spreadsheet not found: {workbook_path}")
+        workbook = load_workbook(path, data_only=True)
+        if "CRM" not in workbook.sheetnames or "_niles" not in workbook.sheetnames:
+            raise NilesError("invalid_sheet", "Workbook is missing the CRM or _niles sheet.")
+        metadata = workbook["_niles"]
+        if metadata["B1"].value != "niles.sheet.v1":
+            raise NilesError("invalid_sheet", "Workbook has an unsupported Niles sheet schema.")
+        exported_sequence = int(metadata["B3"].value or 0)
+        current_sequence = self._next_sequence() - 1
+        if exported_sequence != current_sequence:
+            raise NilesError("stale_sheet", "CRM data changed after this spreadsheet was exported. Export a fresh workbook.", {"exported_sequence": exported_sequence, "current_sequence": current_sequence})
+        try:
+            baseline = json.loads(metadata["B4"].value)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise NilesError("invalid_sheet", "Workbook baseline metadata is invalid.") from exc
+        sheet = workbook["CRM"]
+        expected = ["Name", "Entity Type", "Company", "Stage", "Current Status", "Next Action", "Owner", "Due Date", "Add Note", "_entity_id", "_task_id"]
+        headers = [cell.value for cell in sheet[1]]
+        if headers != expected:
+            raise NilesError("invalid_sheet", "CRM sheet columns were changed.", {"expected": expected, "actual": headers})
+
+        def value(cell: Any) -> str:
+            raw = cell.value
+            if isinstance(raw, (date, datetime)):
+                return raw.date().isoformat() if isinstance(raw, datetime) else raw.isoformat()
+            return str(raw).strip() if raw is not None else ""
+
+        changes = []
+        valid_stages = {"", "target", "engaged", "demo", "pilot", "contracting", "won", "stalled", "lost"}
+        for row in sheet.iter_rows(min_row=2):
+            entity_id, task_id = value(row[9]), value(row[10])
+            if not entity_id:
+                continue
+            if entity_id not in baseline:
+                raise NilesError("unknown_sheet_entity", "Workbook contains an unknown entity row.", {"entity_id": entity_id})
+            before = baseline[entity_id]
+            name, entity_type, company, stage, status, action, owner, due, note = (value(row[index]) for index in range(9))
+            if entity_type not in {"person", "organization", "ambiguous"}:
+                raise NilesError("invalid_entity_type", f"Unsupported spreadsheet entity type '{entity_type}'.", {"entity_id": entity_id})
+            if stage.casefold() not in valid_stages:
+                raise NilesError("invalid_stage", f"Unsupported spreadsheet stage '{stage}'.", {"entity_id": entity_id})
+            if not name:
+                raise NilesError("invalid_name", "Spreadsheet entity names cannot be blank.", {"entity_id": entity_id})
+            if not status and before.get("current_status"):
+                raise NilesError("invalid_status", "Current status cannot be cleared in the spreadsheet; replace it or add a note.", {"entity_id": entity_id})
+            if name != str(before.get("name") or ""):
+                changes.append({"operation": "set_name", "entity_id": entity_id, "before": before.get("name") or "", "after": name})
+            if entity_type != str(before.get("entity_type") or ""):
+                changes.append({"operation": "set_entity_type", "entity_id": entity_id, "before": before.get("entity_type") or "", "after": entity_type})
+            if company != str(before.get("company") or ""):
+                changes.append({"operation": "set_company", "entity_id": entity_id, "before": before.get("company") or "", "after": company})
+            if stage != str(before.get("stage") or ""):
+                changes.append({"operation": "set_stage", "entity_id": entity_id, "before": before.get("stage") or "", "after": stage})
+            if status != str(before.get("current_status") or ""):
+                changes.append({"operation": "set_status", "entity_id": entity_id, "before": before.get("current_status") or "", "after": status})
+            if note:
+                changes.append({"operation": "append_note", "entity_id": entity_id, "after": note})
+            task_before = {key: str(before.get(key) or "") for key in ("next_action", "owner", "due_date")}
+            task_after = {"next_action": action, "owner": owner, "due_date": due}
+            if task_before != task_after:
+                if task_id and not action:
+                    changes.append({"operation": "cancel_task", "entity_id": entity_id, "task_id": task_id, "before": task_before, "after": task_after})
+                elif task_id:
+                    changes.append({"operation": "update_task", "entity_id": entity_id, "task_id": task_id, "before": task_before, "after": task_after})
+                elif action:
+                    changes.append({"operation": "create_task", "entity_id": entity_id, "before": task_before, "after": task_after})
+        if not changes:
+            return {"change_set_id": None, "source_path": str(path), "changes": [], "change_count": 0, "quarantined": False, "event_id": None}
+        change_set_id = new_id("sheet")
+        event = self.append_event("sheet_change_imported", {"id": change_set_id, "source_path": str(path), "changes": changes, "imported_at": utc_now()})
+        return {"change_set_id": change_set_id, "source_path": str(path), "changes": changes, "change_count": len(changes), "quarantined": True, "event_id": event["event_id"]}
+
+    def list_sheet_changes(self, status: str = "pending") -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("select * from sheet_changes where status = ? order by imported_at", (status,)).fetchall()
+        return [{**dict(row), "changes": loads(row["changes"], [])} for row in rows]
+
+    def review_sheet_change(self, change_set_id: str, accept: bool, note: str | None = None) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("select * from sheet_changes where id = ?", (change_set_id,)).fetchone()
+        if row is None:
+            raise NilesError("unknown_sheet_change", f"No spreadsheet change set matched '{change_set_id}'.")
+        if row["status"] != "pending":
+            raise NilesError("sheet_change_reviewed", "Spreadsheet change set has already been reviewed.")
+        changes = loads(row["changes"], [])
+        applied = []
+        if accept:
+            for change in changes:
+                operation = change["operation"]
+                if operation == "set_stage":
+                    applied.append(self.update_contact(change["entity_id"], traits={"stage": change["after"]}))
+                elif operation == "set_name" and change["after"]:
+                    applied.append(self.update_contact(change["entity_id"], name=change["after"]))
+                elif operation == "set_entity_type":
+                    applied.append(self.update_contact(change["entity_id"], traits={"entity_type": change["after"]}))
+                elif operation == "set_company":
+                    applied.append(self.update_contact(change["entity_id"], company=change["after"]))
+                elif operation == "set_status" and change["after"]:
+                    applied.append(self.set_contact_status(change["entity_id"], change["after"], None))
+                elif operation == "append_note":
+                    applied.append(self.add_note(change["entity_id"], change["after"], "spreadsheet", None))
+                elif operation == "create_task":
+                    after = change["after"]
+                    applied.append(self.add_task(change["entity_id"], after["next_action"], after["due_date"] or None, after["owner"] or None, ["spreadsheet"]))
+                elif operation == "update_task":
+                    after = change["after"]
+                    applied.append(self.update_task(change["task_id"], text=after["next_action"], due_date=after["due_date"], assignee=after["owner"]))
+                elif operation == "cancel_task":
+                    applied.append(self.update_task(change["task_id"], status="cancelled", note="Cleared in spreadsheet"))
+        status = "accepted" if accept else "rejected"
+        review = self.append_event("sheet_change_reviewed", {"id": change_set_id, "status": status, "reviewed_at": utc_now(), "note": note})
+        return {"change_set_id": change_set_id, "status": status, "changes": changes, "applied": applied, "review_event_id": review["event_id"]}
+
     def export_human_update(
         self,
         output: Path,
@@ -2070,6 +2316,7 @@ class Project:
                 "pending_intake": conn.execute("select count(*) from submissions join forms on submissions.form_id = forms.id where submissions.status = 'pending' and forms.kind = 'intake'").fetchone()[0],
                 "pending_status_updates": conn.execute("select count(*) from submissions join forms on submissions.form_id = forms.id where submissions.status = 'pending' and forms.kind = 'status-request'").fetchone()[0],
                 "pending_recommendations": conn.execute("select count(*) from recommendations where status = 'pending'").fetchone()[0],
+                "pending_sheet_changes": conn.execute("select count(*) from sheet_changes where status = 'pending'").fetchone()[0],
             }
 
     def _contact_by_id(self, conn: sqlite3.Connection, contact_id: str) -> dict[str, Any]:

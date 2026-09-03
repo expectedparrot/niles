@@ -990,6 +990,86 @@ def test_human_update_requires_entities(tmp_path):
         assert payload["errors"][0]["code"] == "no_entities"
 
 
+def test_spreadsheet_export_import_review_round_trip(tmp_path):
+    if not importlib.util.find_spec("openpyxl"):
+        return
+    assert run_niles(tmp_path, "init")[0] == 0
+    account = run_niles(tmp_path, "contact", "add", "Burns Industries", "--tag", "company", "--tag", "prospect", "--trait", "stage=pilot")[1]["data"]["contact"]
+    person = run_niles(tmp_path, "contact", "add", "Waylon Smithers", "--tag", "person", "--company", "Burns Industries")[1]["data"]["contact"]
+    task = run_niles(tmp_path, "task", "add", account["id"], "Send proposal", "--assign", "Lionel", "--due", "2026-09-05")[1]["data"]["task"]
+    assert run_niles(tmp_path, "contact", "status", account["id"], "Demo complete")[0] == 0
+
+    workbook_path = tmp_path / "crm-review.xlsx"
+    code, exported = run_niles(tmp_path, "sheet", "export", "--output", str(workbook_path))
+    assert code == 0
+    assert exported["data"]["scope"] == "pipeline"
+    assert exported["data"]["entities"] == 1
+
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(workbook_path)
+    assert workbook["_niles"].sheet_state == "hidden"
+    assert workbook["_lists"].sheet_state == "hidden"
+    sheet = workbook["CRM"]
+    assert sheet["J2"].value == account["id"]
+    assert sheet["K2"].value == task["id"]
+    assert len(sheet.data_validations.dataValidation) == 2
+    sheet["D2"] = "contracting"
+    sheet["E2"] = "Contract with Mr. Burns"
+    sheet["F2"] = "Call Smithers"
+    sheet["G2"] = "Selma"
+    sheet["H2"] = "2026-09-08"
+    sheet["I2"] = "Burns requested one revision"
+    workbook.save(workbook_path)
+
+    code, imported = run_niles(tmp_path, "sheet", "import", str(workbook_path))
+    assert code == 0
+    assert imported["data"]["quarantined"] is True
+    assert imported["data"]["change_count"] == 4
+    assert run_niles(tmp_path, "contact", "show", account["id"])[1]["data"]["contact"]["traits"]["stage"] == "pilot"
+    pending = run_niles(tmp_path, "sheet", "review")[1]["data"]["pending"]
+    assert len(pending) == 1
+    change_set_id = pending[0]["id"]
+    assert run_niles(tmp_path, "sheet", "review", change_set_id, "--accept")[0] == 0
+
+    updated = run_niles(tmp_path, "contact", "show", account["id"])[1]["data"]["contact"]
+    assert updated["traits"]["stage"] == "contracting"
+    assert updated["traits"]["current_status"] == "Contract with Mr. Burns"
+    notes = run_niles(tmp_path, "note", "list", account["id"])[1]["data"]["notes"]
+    assert any(note["text"] == "Burns requested one revision" for note in notes)
+    tasks = run_niles(tmp_path, "task", "list", "--contact", account["id"])[1]["data"]["tasks"]
+    assert tasks[0]["text"] == "Call Smithers"
+    assert tasks[0]["assignee"] == "Selma"
+    assert tasks[0]["due_date"] == "2026-09-08"
+    assert run_niles(tmp_path, "fsck")[0] == 0
+    people_path = tmp_path / "people.xlsx"
+    assert run_niles(tmp_path, "sheet", "export", "--scope", "people", "--output", str(people_path))[1]["data"]["entities"] == 1
+    assert person["id"] == load_workbook(people_path, data_only=True)["CRM"]["J2"].value
+    unchanged = run_niles(tmp_path, "sheet", "import", str(people_path))[1]["data"]
+    assert unchanged["change_count"] == 0
+    assert unchanged["quarantined"] is False
+    people_workbook = load_workbook(people_path)
+    people_workbook["CRM"]["I2"] = "Do not apply this note"
+    people_workbook.save(people_path)
+    rejected_import = run_niles(tmp_path, "sheet", "import", str(people_path))[1]["data"]
+    assert run_niles(tmp_path, "sheet", "review", rejected_import["change_set_id"], "--reject", "--note", "Not verified")[0] == 0
+    person_notes = run_niles(tmp_path, "note", "list", person["id"])[1]["data"]["notes"]
+    assert not any(note["text"] == "Do not apply this note" for note in person_notes)
+
+
+def test_spreadsheet_import_rejects_stale_export(tmp_path):
+    if not importlib.util.find_spec("openpyxl"):
+        return
+    assert run_niles(tmp_path, "init")[0] == 0
+    account = run_niles(tmp_path, "contact", "add", "Krusty Burger", "--tag", "prospect")[1]["data"]["contact"]
+    workbook_path = tmp_path / "stale.xlsx"
+    assert run_niles(tmp_path, "sheet", "export", "--output", str(workbook_path))[0] == 0
+    assert run_niles(tmp_path, "contact", "status", account["id"], "Newer CRM status")[0] == 0
+    code, payload = run_niles(tmp_path, "sheet", "import", str(workbook_path))
+    assert code == 1
+    assert payload["errors"][0]["code"] == "stale_sheet"
+
+
 def test_managed_exchange_hides_storage_paths_from_routine_commands(tmp_path):
     assert run_niles(tmp_path, "init")[0] == 0
     code, exported = run_niles(tmp_path, "intake", "export", "intake-basic")

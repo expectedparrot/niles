@@ -8,6 +8,8 @@
 - Use `niles sync` for CRM commits and pushes. Do not stage internal paths.
 - Treat imported human responses and recommendations as quarantined until an
   explicit `review`, `accept`, `merge`, or `reject` command.
+- Treat `niles sheet import` changes as quarantined; inspect them with `niles
+  sheet review` before explicitly accepting or rejecting the change set.
 
 ## Expected Parrot boundary
 

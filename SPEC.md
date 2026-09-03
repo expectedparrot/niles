@@ -230,6 +230,9 @@ niles status-request import <form-id> [<responses.ep>]
 niles status-request review                 # accept / edit / reject learned updates
 niles human-update --scope pipeline|people|organizations|all [--tag t] [--stage s]
                    [--entity-id id] [--include-archived] --output <update-job.ep>
+niles sheet export [--scope pipeline|people|organizations|all] --output <crm.xlsx>
+niles sheet import <crm.xlsx>
+niles sheet review [<change-set-id> --accept|--reject]
 
 niles report pipeline | activity | neglect | tasks
 niles report status --html status.html

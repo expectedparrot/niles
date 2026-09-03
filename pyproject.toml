@@ -16,7 +16,8 @@ dependencies = []
 
 [project.optional-dependencies]
 edsl = ["edsl"]
-test = ["pytest", "pytest-cov"]
+spreadsheet = ["openpyxl>=3.1"]
+test = ["pytest", "pytest-cov", "openpyxl>=3.1"]
 
 [project.scripts]
 niles = "niles.cli:main"

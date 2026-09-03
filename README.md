@@ -64,6 +64,12 @@ python -c "import edsl; print(edsl.__version__)"
 ep --help
 ```
 
+Install spreadsheet support for the editable `.xlsx` interface:
+
+```bash
+python -m pip install "niles[spreadsheet] @ git+https://github.com/expectedparrot/niles.git"
+```
+
 The `ep` commands that publish or retrieve Expected Parrot data require
 `EXPECTED_PARROT_API_KEY`. Niles itself never authenticates with Expected
 Parrot or makes network calls. Never put API keys in CRM state or git history.
@@ -550,6 +556,31 @@ ep humanize create --survey update_job.ep --name "Niles status update"
 The adjacent `update_job.ep.manifest.json` records the stable Niles entity ID
 for every update question so retrieved answers can be routed without relying on
 mutable names. EP—not Niles—publishes the survey and requests responses.
+
+## Editable spreadsheet interface
+
+Export the current pipeline to a formatted workbook with stage and entity-type
+dropdowns, frozen headers, filters, and hidden stable IDs:
+
+```bash
+niles sheet export --output crm-review.xlsx
+```
+
+Use `--scope people`, `--scope organizations`, or `--scope all` for a different
+view. Edit the workbook, then import it as a quarantined change set:
+
+```bash
+niles sheet import crm-review.xlsx
+niles sheet review
+niles sheet review <change-set-id> --accept
+```
+
+The review shows field-level before/after values. Acceptance turns edits into
+normal append-only contact, status, note, and task events; rejection records the
+decision without changing CRM data. Clearing an existing next action proposes
+task cancellation, while entering one on an empty row proposes a new task.
+Deleted rows never delete CRM records. If CRM events were added after export,
+import rejects the stale workbook and asks for a fresh export.
 
 ## Recommendation jobs
 
